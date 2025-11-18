@@ -2,7 +2,7 @@
 
 import html
 import logging
-import os  # <-- Імпорт 'os'
+import os
 from fastapi import APIRouter, Depends, Form, HTTPException
 from fastapi.responses import RedirectResponse, HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,8 +13,7 @@ from urllib.parse import quote_plus
 from aiogram.utils.keyboard import InlineKeyboardBuilder, InlineKeyboardButton
 import re
 
-
-from models import Order, OrderStatus, Employee, Role, OrderStatusHistory, Settings
+from models import Order, OrderStatus, Employee, Role, OrderStatusHistory, Settings, Product
 from templates import ADMIN_HTML_TEMPLATE, ADMIN_ORDER_MANAGE_BODY
 from dependencies import get_db_session, check_credentials
 from notification_manager import notify_all_parties_on_status_change
@@ -23,11 +22,8 @@ from notification_manager import notify_all_parties_on_status_change
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# --- Функція get_bot_instances оновлена ---
 async def get_bot_instances(session: AsyncSession) -> tuple[Bot | None, Bot | None]:
     """Допоміжна функція для отримання екземплярів ботів на основі змінних оточення."""
-    
-    # Читаємо токени напряму з os.environ
     admin_bot_token = os.environ.get('ADMIN_BOT_TOKEN')
     client_bot_token = os.environ.get('CLIENT_BOT_TOKEN')
 
@@ -41,7 +37,18 @@ async def get_bot_instances(session: AsyncSession) -> tuple[Bot | None, Bot | No
     admin_bot = Bot(token=admin_bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     client_bot = Bot(token=client_bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     return admin_bot, client_bot
-# --- КІНЕЦЬ get_bot_instances ---
+
+def parse_products_str(products_str: str) -> dict:
+    """Парсить рядок продуктів у словник {'Назва': кількість}."""
+    if not products_str: return {}
+    result = {}
+    for part in products_str.split(", "):
+        try:
+            if " x " in part:
+                name, qty = part.rsplit(" x ", 1)
+                result[name.strip()] = int(qty)
+        except ValueError: continue
+    return result
 
 @router.get("/admin/order/manage/{order_id}", response_class=HTMLResponse)
 async def get_manage_order_page(
@@ -63,6 +70,29 @@ async def get_manage_order_page(
     )
     if not order:
         raise HTTPException(status_code=404, detail="Замовлення не знайдено")
+
+    # --- Формування списку товарів з іконками цехів ---
+    products_map = parse_products_str(order.products)
+    products_html_list = []
+    
+    if products_map:
+        product_names = list(products_map.keys())
+        # Отримуємо інформацію про цех для кожного товару
+        products_res = await session.execute(select(Product).where(Product.name.in_(product_names)))
+        db_products = {p.name: p for p in products_res.scalars().all()}
+
+        for name, qty in products_map.items():
+            icon = "❓"
+            if prod := db_products.get(name):
+                if prod.preparation_area == 'kitchen':
+                    icon = "🍳" # Кухня
+                elif prod.preparation_area == 'bar':
+                    icon = "🍹" # Бар
+            
+            products_html_list.append(f"<li>{icon} {html.escape(name)} x {qty}</li>")
+    
+    products_html = "<ul>" + "".join(products_html_list) + "</ul>" if products_html_list else "<i>Товарів немає</i>"
+    # ---------------------------------------------------
 
     statuses_res = await session.execute(select(OrderStatus).order_by(OrderStatus.id))
     all_statuses = statuses_res.scalars().all()
@@ -90,12 +120,10 @@ async def get_manage_order_page(
         history_html += f"<li><b>{entry.status.name}</b> (Ким: {html.escape(entry.actor_info)}) - {timestamp}</li>"
     history_html += "</ul>"
     
-    products_html = "<ul>" + "".join([f"<li>{html.escape(item.strip())}</li>" for item in order.products.split(',')]) + "</ul>"
-
     body = ADMIN_ORDER_MANAGE_BODY.format(
         order_id=order.id,
-        customer_name=html.escape(order.customer_name),
-        phone_number=html.escape(order.phone_number),
+        customer_name=html.escape(order.customer_name or "Не вказано"),
+        phone_number=html.escape(order.phone_number or "Не вказано"),
         address=html.escape(order.address or "Самовивіз"),
         total_price=order.total_price,
         products_html=products_html,

@@ -14,12 +14,11 @@ from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 from urllib.parse import quote_plus
 import re
-import os # <--- ДОБАВЛЕНО: для доступа к os.environ
+import os
 
 from models import Order, Product, Category, OrderStatus, Employee, Role, Settings, OrderStatusHistory
-# --- ПОЧАТОК ЗМІН: Додано _generate_waiter_order_view ---
-from courier_handlers import get_operator_keyboard, get_staff_login_keyboard, get_courier_keyboard, _generate_waiter_order_view
-# --- КІНЕЦЬ ЗМІН ---
+# Ми залишаємо імпорт _generate_waiter_order_view, оскільки він використовується для перегляду замовлень "в закладі"
+from courier_handlers import _generate_waiter_order_view
 from notification_manager import notify_all_parties_on_status_change
 
 # Налаштування логування
@@ -30,8 +29,7 @@ class AdminEditOrderStates(StatesGroup):
     waiting_for_new_phone = State()
     waiting_for_new_address = State()
 
-class OperatorAuthStates(StatesGroup):
-    waiting_for_phone = State()
+# OperatorAuthStates видалено, бо авторизація тепер у courier_handlers.py
 
 def parse_products_string(products_str: str) -> dict[str, int]:
     """Розбирає рядок 'Назва x Кількість, ...' на словник."""
@@ -165,8 +163,8 @@ async def _display_edit_delivery_menu(bot: Bot, chat_id: int, message_id: int, o
     toggle_text = "Зробити Самовивозом" if order.is_delivery else "Зробити Доставкою"
     kb.row(InlineKeyboardButton(text=toggle_text, callback_data=f"toggle_delivery_type_{order.id}"))
     if order.is_delivery:
-        kb.row(InlineKeyboardButton(text="Змінити адресу", callback_data=f"change_address_start_{order_id}"))
-    kb.row(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"edit_order_{order_id}"))
+        kb.row(InlineKeyboardButton(text="Змінити адресу", callback_data=f"change_address_start_{order.id}"))
+    kb.row(InlineKeyboardButton(text="⬅️ Назад", callback_data=f"edit_order_{order.id}"))
 
     await bot.edit_message_text(
         text=text,
@@ -177,44 +175,24 @@ async def _display_edit_delivery_menu(bot: Bot, chat_id: int, message_id: int, o
 
 
 def register_admin_handlers(dp: Dispatcher):
-    @dp.message(F.text == "🔐 Вхід оператора")
-    async def operator_login_start(message: Message, state: FSMContext, session: AsyncSession):
-        employee = await session.scalar(select(Employee).where(Employee.telegram_user_id == message.from_user.id).options(joinedload(Employee.role)))
-        if employee:
-            if employee.role.can_manage_orders:
-                return await message.answer(f"✅ Ви вже авторизовані як оператор.", reply_markup=get_operator_keyboard(employee))
-            elif employee.role.can_be_assigned:
-                return await message.answer("❌ Ви авторизовані як кур'єр. Для входу як оператор, спочатку вийдіть із системи.", reply_markup=get_courier_keyboard(employee))
-        await state.set_state(OperatorAuthStates.waiting_for_phone)
-        kb = InlineKeyboardBuilder().add(InlineKeyboardButton(text="❌ Скасувати", callback_data="cancel_auth")).as_markup()
-        await message.answer("Будь ласка, введіть номер телефону для ролі **оператора**:", reply_markup=kb)
-
-    @dp.message(OperatorAuthStates.waiting_for_phone)
-    async def process_operator_phone(message: Message, state: FSMContext, session: AsyncSession):
-        phone = message.text.strip()
-        employee = await session.scalar(select(Employee).options(joinedload(Employee.role)).where(Employee.phone_number == phone))
-        if employee and employee.role.can_manage_orders:
-            employee.telegram_user_id = message.from_user.id
-            await session.commit()
-            await state.clear()
-            await message.answer(f"🎉 Доброго дня, {employee.full_name}! Ви успішно авторизовані як {employee.role.name}.", reply_markup=get_operator_keyboard(employee))
-        else:
-            await message.answer("❌ Співробітника з таким номером не знайдено або він не має прав Оператора.")
+    # Логіку входу оператора видалено, оскільки вона тепер у courier_handlers.py
     
     @dp.callback_query(F.data.startswith("change_order_status_"))
     async def change_order_status_admin(callback: CallbackQuery, session: AsyncSession):
+        # Отримуємо екземпляр клієнтського бота для сповіщень
         client_bot = dp.get("client_bot")
+        
         employee = await session.scalar(select(Employee).where(Employee.telegram_user_id == callback.from_user.id))
         actor_info = f"Оператор: {employee.full_name}" if employee else f"Оператор (ID: {callback.from_user.id})"
         
         parts = callback.data.split("_")
         order_id, new_status_id = int(parts[3]), int(parts[4])
 
-        order = await session.get(Order, order_id)
+        order = await session.get(Order, order_id, options=[joinedload(Order.status)]) # Додано завантаження статусу
         if not order: return await callback.answer("Замовлення не знайдено!", show_alert=True)
         if order.status_id == new_status_id: return await callback.answer("Статус вже встановлено.")
 
-        old_status = await session.get(OrderStatus, order.status_id)
+        old_status = order.status
         old_status_name = old_status.name if old_status else 'Невідомий'
 
         order.status_id = new_status_id
@@ -228,6 +206,7 @@ def register_admin_handlers(dp: Dispatcher):
         
         await session.commit()
         
+        # Оновлене сповіщення з передачею client_bot
         await notify_all_parties_on_status_change(
             order=order,
             old_status_name=old_status_name,
@@ -243,12 +222,10 @@ def register_admin_handlers(dp: Dispatcher):
     @dp.callback_query(F.data.startswith("edit_order_"))
     async def show_edit_order_menu(callback: CallbackQuery, session: AsyncSession):
         order_id = int(callback.data.split("_")[2])
-        # ВИПРАВЛЕННЯ NameError: завантажуємо order для відображення order.id
         order = await session.get(Order, order_id, options=[joinedload(Order.status)])
         if not order: 
              return await callback.answer("Замовлення не знайдено!", show_alert=True)
         
-        # ПЕРЕВІРКА: чи статус є фінальним (виконано або скасовано)
         if order.status.is_completed_status or order.status.is_cancelled_status:
             return await callback.answer(
                 "Неможливо редагувати замовлення, яке вже виконано або скасовано.", 
@@ -261,7 +238,6 @@ def register_admin_handlers(dp: Dispatcher):
         kb.row(InlineKeyboardButton(text="🚚 Доставка", callback_data=f"edit_delivery_{order_id}"))
         kb.row(InlineKeyboardButton(text="⬅️ Повернутися до замовлення", callback_data=f"view_order_{order_id}"))
         
-        # ВИКОРИСТАННЯ order.id, оскільки об'єкт order тепер завантажено
         await callback.message.edit_text(f"📝 <b>Редагування замовлення #{order.id}</b>\nВиберіть, що хочете змінити:", reply_markup=kb.as_markup())
         await callback.answer()
 
@@ -424,14 +400,13 @@ def register_admin_handlers(dp: Dispatcher):
     @dp.callback_query(F.data.startswith("select_courier_"))
     async def select_courier_start(callback: CallbackQuery, session: AsyncSession):
         order_id = int(callback.data.split("_")[2])
-        # ВИПРАВЛЕНО: Збираємо ID усіх ролей, які можуть бути кур'єрами
+        # Збираємо ID усіх ролей, які можуть бути кур'єрами
         courier_roles_res = await session.execute(select(Role.id).where(Role.can_be_assigned == True))
         courier_role_ids = courier_roles_res.scalars().all()
         
         if not courier_role_ids:
             return await callback.answer("Помилка: Роль 'Кур'єр' не знайдена в системі.", show_alert=True)
         
-        # Фільтруємо співробітників за усіма знайденими ролями та статусом "на зміні"
         couriers = (await session.execute(select(Employee).where(Employee.role_id.in_(courier_role_ids), Employee.is_on_shift == True).order_by(Employee.full_name))).scalars().all()
         
         kb = InlineKeyboardBuilder()
@@ -455,11 +430,9 @@ def register_admin_handlers(dp: Dispatcher):
         admin_chat_id_str = os.environ.get('ADMIN_CHAT_ID')
 
         order_id, courier_id = map(int, callback.data.split("_")[2:])
-        # Завантажуємо order зі статусом для перевірки
         order = await session.get(Order, order_id, options=[joinedload(Order.status)])
         if not order: return await callback.answer("Замовлення не знайдено!", show_alert=True)
         
-        # ПЕРЕВІРКА: чи статус є фінальним (виконано або скасовано)
         if order.status.is_completed_status or order.status.is_cancelled_status:
              return await callback.answer(
                 "Неможливо призначити кур'єра на замовлення, яке вже виконано або скасовано.", 

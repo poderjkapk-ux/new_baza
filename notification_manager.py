@@ -6,14 +6,30 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder, InlineKeyboardButton
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from models import Order, Settings, OrderStatus, Employee, Role
+from models import Order, Settings, OrderStatus, Employee, Role, Product
 
 logger = logging.getLogger(__name__)
 
+def _parse_products_str(products_str: str) -> dict:
+    """
+    Парсить рядок продуктів у словник {'Назва': кількість}.
+    Формат: 'Назва x 1, Назва 2 x 2'
+    """
+    if not products_str:
+        return {}
+    result = {}
+    for part in products_str.split(", "):
+        try:
+            if " x " in part:
+                name, qty = part.rsplit(" x ", 1)
+                result[name.strip()] = int(qty)
+        except ValueError:
+            continue
+    return result
 
 async def notify_new_order_to_staff(admin_bot: Bot, order: Order, session: AsyncSession):
     """
-    Надсилає сповіщення про НОВЕ замовлення в загальний чат, операторам та поварам.
+    Надсилає сповіщення про НОВЕ замовлення в загальний чат, операторам, поварам та барменам.
     """
     admin_chat_id_str = os.environ.get('ADMIN_CHAT_ID')
     
@@ -77,50 +93,102 @@ async def notify_new_order_to_staff(admin_bot: Bot, order: Order, session: Async
         except Exception as e:
             logger.error(f"Не вдалося відправити нове замовлення оператору/адміну {chat_id}: {e}")
 
-    # 2. СПОВІЩЕННЯ ПОВАРІВ (Якщо статус вимагає цього при створенні)
+    # 2. РОЗПОДІЛ НА ВИРОБНИЦТВО (Кухня/Бар)
+    # Використовуємо прапорець requires_kitchen_notify як загальний тригер "На виробництво"
     if order.status and order.status.requires_kitchen_notify:
-        await send_order_to_kitchen(admin_bot, order, session)
+        await distribute_order_to_production(admin_bot, order, session)
 
 
-async def send_order_to_kitchen(bot: Bot, order: Order, session: AsyncSession):
+async def distribute_order_to_production(bot: Bot, order: Order, session: AsyncSession):
     """
-    Окрема функція для відправки чека на кухню (поварам).
+    Розподіляє товари замовлення між Кухнею та Баром і надсилає відповідним працівникам.
     """
-    chef_roles_res = await session.execute(select(Role.id).where(Role.can_receive_kitchen_orders == True))
-    chef_role_ids = chef_roles_res.scalars().all()
-
-    if not chef_role_ids:
+    # 1. Парсимо товари
+    products_map = _parse_products_str(order.products)
+    if not products_map:
         return
 
-    chefs_on_shift_res = await session.execute(
+    # 2. Отримуємо деталі товарів з БД (щоб знати preparation_area)
+    names = list(products_map.keys())
+    products_res = await session.execute(select(Product).where(Product.name.in_(names)))
+    db_products = products_res.scalars().all()
+
+    kitchen_items = []
+    bar_items = []
+
+    for product in db_products:
+        qty = products_map.get(product.name)
+        if qty:
+            item_str = f"- {html.quote(product.name)} x {qty}"
+            if product.preparation_area == 'bar':
+                bar_items.append(item_str)
+            else:
+                # За замовчуванням або якщо kitchen
+                kitchen_items.append(item_str)
+
+    # 3. Відправляємо на Кухню
+    if kitchen_items:
+        await send_group_notification(
+            bot=bot,
+            order=order,
+            items=kitchen_items,
+            role_filter=Role.can_receive_kitchen_orders == True,
+            title="🧑‍🍳 ЗАМОВЛЕННЯ НА КУХНЮ",
+            session=session
+        )
+
+    # 4. Відправляємо на Бар
+    if bar_items:
+        await send_group_notification(
+            bot=bot,
+            order=order,
+            items=bar_items,
+            role_filter=Role.can_receive_bar_orders == True,
+            title="🍹 ЗАМОВЛЕННЯ НА БАР",
+            session=session
+        )
+
+
+async def send_group_notification(bot: Bot, order: Order, items: list, role_filter, title: str, session: AsyncSession):
+    """
+    Універсальна функція для відправки чека групі співробітників (повари або бармени).
+    """
+    # Шукаємо ролі
+    roles_res = await session.execute(select(Role.id).where(role_filter))
+    role_ids = roles_res.scalars().all()
+
+    if not role_ids:
+        return
+
+    # Шукаємо працівників на зміні
+    employees_res = await session.execute(
         select(Employee).where(
-            Employee.role_id.in_(chef_role_ids),
+            Employee.role_id.in_(role_ids),
             Employee.is_on_shift == True,
             Employee.telegram_user_id.is_not(None)
         )
     )
-    chefs = chefs_on_shift_res.scalars().all()
+    employees = employees_res.scalars().all()
 
-    if chefs:
-        products_formatted = "- " + html.quote(order.products or '').replace(", ", "\n- ")
+    if employees:
         is_delivery = order.is_delivery
+        items_formatted = "\n".join(items)
         
-        chef_text = (f"🧑‍🍳 <b>ЗАМОВЛЕННЯ НА КУХНЮ: #{order.id}</b>\n"
-                     f"<b>Тип:</b> {'Доставка' if is_delivery else 'В закладі / Самовивіз'}\n"
-                     f"<b>Час:</b> {html.quote(order.delivery_time)}\n\n"
-                     f"<b>СКЛАД:</b>\n{products_formatted}\n\n"
-                     f"<i>Натисніть 'Видача', коли замовлення буде готове.</i>")
+        text = (f"{title}: <b>#{order.id}</b>\n"
+                f"<b>Тип:</b> {'Доставка' if is_delivery else 'В закладі / Самовивіз'}\n"
+                f"<b>Час:</b> {html.quote(order.delivery_time)}\n\n"
+                f"<b>СКЛАД:</b>\n{items_formatted}\n\n"
+                f"<i>Натисніть 'Видача', коли буде готове.</i>")
         
-        kb_chef = InlineKeyboardBuilder()
-        kb_chef.row(InlineKeyboardButton(text=f"✅ Видача #{order.id}", callback_data=f"chef_ready_{order.id}"))
+        kb = InlineKeyboardBuilder()
+        # Callback той самий, оскільки логіка зміни статусу на "Готовий" однакова
+        kb.row(InlineKeyboardButton(text=f"✅ Видача #{order.id}", callback_data=f"chef_ready_{order.id}"))
         
-        for chef in chefs:
+        for emp in employees:
             try:
-                await bot.send_message(chef.telegram_user_id, chef_text, reply_markup=kb_chef.as_markup())
+                await bot.send_message(emp.telegram_user_id, text, reply_markup=kb.as_markup())
             except Exception as e:
-                logger.error(f"Не вдалося відправити замовлення повару {chef.id}: {e}")
-    else:
-        logger.warning(f"Замовлення #{order.id} потребує кухні, але немає поварів на зміні.")
+                logger.error(f"Не вдалося відправити замовлення працівнику {emp.id}: {e}")
 
 
 async def notify_all_parties_on_status_change(
@@ -151,14 +219,10 @@ async def notify_all_parties_on_status_change(
         except Exception as e:
             logger.error(f"Не вдалося відправити лог в адмін-чат: {e}")
 
-    # 2. ЛОГІКА ДЛЯ КУХНІ: Якщо новий статус вимагає оповіщення кухні
-    # І старий статус НЕ вимагав (щоб не дублювати, якщо міняємо шило на мило)
-    # Або якщо ми просто хочемо гарантувати відправку
+    # 2. ЛОГІКА ДЛЯ ВИРОБНИЦТВА (Кухня/Бар)
     if new_status.requires_kitchen_notify:
-        # Перевіряємо, чи не було це замовлення щойно створено (щоб уникнути дубля при створенні)
-        # Але notify_new_order_to_staff викликається тільки при створенні. 
-        # Тут ми точно знаємо, що це зміна статусу.
-        await send_order_to_kitchen(admin_bot, order, session)
+        # Відправляємо розподілене замовлення
+        await distribute_order_to_production(admin_bot, order, session)
 
     # 3. СПОВІЩЕННЯ ПІД ЧАС ВИДАЧІ ("Готовий до видачі")
     if new_status.name == "Готовий до видачі":

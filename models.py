@@ -17,16 +17,6 @@ if not DATABASE_URL:
 
 engine = create_async_engine(DATABASE_URL)
 
-# Ця функція потрібна ТІЛЬКИ для SQLite і була правильно закоментована
-# PostgreSQL не підтримує PRAGMA, і цей код викличе помилку.
-# def enable_foreign_keys_sync(dbapi_connection, connection_record):
-#     cursor = dbapi_connection.cursor()
-#     cursor.execute("PRAGMA foreign_keys=ON")
-#     cursor.close()
-# 
-# sync_engine = engine.sync_engine
-# event.listens_for(sync_engine, "connect")(enable_foreign_keys_sync)
-
 async_session_maker = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
@@ -61,8 +51,11 @@ class Role(Base):
     can_manage_orders: Mapped[bool] = mapped_column(sa.Boolean, default=False)
     can_be_assigned: Mapped[bool] = mapped_column(sa.Boolean, default=False, comment="Може бути призначений на замовлення (кур'єр)")
     can_serve_tables: Mapped[bool] = mapped_column(sa.Boolean, default=False, comment="Може обслуговувати столики (офіціант)")
-    # --- НОВЕ ПОЛЕ: Для повара ---
+    # --- ДЛЯ КУХНІ ---
     can_receive_kitchen_orders: Mapped[bool] = mapped_column(sa.Boolean, default=False, comment="Отримує замовлення для приготування (Повар)")
+    # --- НОВЕ ПОЛЕ: ДЛЯ БАРУ ---
+    can_receive_bar_orders: Mapped[bool] = mapped_column(sa.Boolean, default=False, server_default=text("false"), comment="Отримує замовлення для бару (Бармен)")
+    
     employees: Mapped[list["Employee"]] = relationship("Employee", back_populates="role")
 
 class Employee(Base):
@@ -111,7 +104,10 @@ class Product(Base):
     category_id: Mapped[int] = mapped_column(sa.ForeignKey('categories.id'))
     category: Mapped["Category"] = relationship("Category", back_populates="products")
     cart_items: Mapped[list["CartItem"]] = relationship("CartItem", back_populates="product")
-    # --- ВИДАЛЕНО: r_keeper_id ---
+    
+    # --- НОВЕ ПОЛЕ: Цех приготування ---
+    # 'kitchen' - Кухня, 'bar' - Бар
+    preparation_area: Mapped[str] = mapped_column(sa.String(20), default='kitchen', server_default=text("'kitchen'"), nullable=False)
 
 
 class OrderStatus(Base):
@@ -123,10 +119,14 @@ class OrderStatus(Base):
     visible_to_operator: Mapped[bool] = mapped_column(sa.Boolean, default=True, server_default=text("true"), nullable=False)
     visible_to_courier: Mapped[bool] = mapped_column(sa.Boolean, default=False, server_default=text("false"), nullable=False)
     visible_to_waiter: Mapped[bool] = mapped_column(sa.Boolean, default=False, server_default=text("false"), nullable=False)
-    # --- НОВЕ ПОЛЕ: Видимий для повара ---
+    
     visible_to_chef: Mapped[bool] = mapped_column(sa.Boolean, default=False, server_default=text("false"), nullable=False)
-    # --- НОВЕ ПОЛЕ: Вимагає сповіщення кухні ---
+    # --- НОВЕ ПОЛЕ: Видимий для бармена ---
+    visible_to_bartender: Mapped[bool] = mapped_column(sa.Boolean, default=False, server_default=text("false"), nullable=False)
+    
+    # Вимагає сповіщення виробництва (кухні/бару)
     requires_kitchen_notify: Mapped[bool] = mapped_column(sa.Boolean, default=False, server_default=text("false"), nullable=False)
+    
     is_completed_status: Mapped[bool] = mapped_column(sa.Boolean, default=False, server_default=text("false"), nullable=False)
     is_cancelled_status: Mapped[bool] = mapped_column(sa.Boolean, default=False, server_default=text("false"), nullable=False)
 
@@ -247,23 +247,25 @@ async def create_db_tables():
         result_status = await session.execute(sa.select(OrderStatus).limit(1))
         if not result_status.scalars().first():
             default_statuses = {
-                # Новий статус, який відразу йде на кухню
-                "Новий": {"visible_to_operator": True, "visible_to_courier": False, "visible_to_waiter": True, "visible_to_chef": True, "requires_kitchen_notify": True},
-                "В обробці": {"visible_to_operator": True, "visible_to_courier": False, "visible_to_waiter": True, "visible_to_chef": True, "requires_kitchen_notify": False},
-                "Готовий до видачі": {"visible_to_operator": True, "visible_to_courier": True, "visible_to_waiter": True, "visible_to_chef": False, "notify_customer": True, "requires_kitchen_notify": False},
+                # Новий статус: visible_to_bartender=True
+                "Новий": {"visible_to_operator": True, "visible_to_courier": False, "visible_to_waiter": True, "visible_to_chef": True, "visible_to_bartender": True, "requires_kitchen_notify": True},
+                "В обробці": {"visible_to_operator": True, "visible_to_courier": False, "visible_to_waiter": True, "visible_to_chef": True, "visible_to_bartender": True, "requires_kitchen_notify": False},
+                "Готовий до видачі": {"visible_to_operator": True, "visible_to_courier": True, "visible_to_waiter": True, "visible_to_chef": False, "visible_to_bartender": False, "notify_customer": True, "requires_kitchen_notify": False},
                 "Доставлений": {"visible_to_operator": True, "visible_to_courier": True, "is_completed_status": True},
-                "Скасований": {"visible_to_operator": True, "visible_to_courier": False, "is_cancelled_status": True, "visible_to_waiter": True, "visible_to_chef": False},
-                "Оплачено": {"visible_to_operator": True, "is_completed_status": True, "visible_to_waiter": True, "visible_to_chef": False, "notify_customer": False}
+                "Скасований": {"visible_to_operator": True, "visible_to_courier": False, "is_cancelled_status": True, "visible_to_waiter": True, "visible_to_chef": False, "visible_to_bartender": False},
+                "Оплачено": {"visible_to_operator": True, "is_completed_status": True, "visible_to_waiter": True, "visible_to_chef": False, "visible_to_bartender": False, "notify_customer": False}
             }
             for name, props in default_statuses.items():
                 session.add(OrderStatus(name=name, **props))
 
         result_roles = await session.execute(sa.select(Role).limit(1))
         if not result_roles.scalars().first():
-            session.add(Role(name="Адміністратор", can_manage_orders=True, can_be_assigned=True, can_serve_tables=True, can_receive_kitchen_orders=True))
-            session.add(Role(name="Оператор", can_manage_orders=True, can_be_assigned=False, can_serve_tables=True, can_receive_kitchen_orders=True))
-            session.add(Role(name="Кур'єр", can_manage_orders=False, can_be_assigned=True, can_serve_tables=False, can_receive_kitchen_orders=False))
-            session.add(Role(name="Офіціант", can_manage_orders=False, can_be_assigned=False, can_serve_tables=True, can_receive_kitchen_orders=False))
-            session.add(Role(name="Повар", can_manage_orders=False, can_be_assigned=False, can_serve_tables=False, can_receive_kitchen_orders=True))
+            session.add(Role(name="Адміністратор", can_manage_orders=True, can_be_assigned=True, can_serve_tables=True, can_receive_kitchen_orders=True, can_receive_bar_orders=True))
+            session.add(Role(name="Оператор", can_manage_orders=True, can_be_assigned=False, can_serve_tables=True, can_receive_kitchen_orders=True, can_receive_bar_orders=True))
+            session.add(Role(name="Кур'єр", can_manage_orders=False, can_be_assigned=True, can_serve_tables=False, can_receive_kitchen_orders=False, can_receive_bar_orders=False))
+            session.add(Role(name="Офіціант", can_manage_orders=False, can_be_assigned=False, can_serve_tables=True, can_receive_kitchen_orders=False, can_receive_bar_orders=False))
+            session.add(Role(name="Повар", can_manage_orders=False, can_be_assigned=False, can_serve_tables=False, can_receive_kitchen_orders=True, can_receive_bar_orders=False))
+            # --- ДОДАЄМО БАРМЕНА ---
+            session.add(Role(name="Бармен", can_manage_orders=False, can_be_assigned=False, can_serve_tables=False, can_receive_kitchen_orders=False, can_receive_bar_orders=True))
 
         await session.commit()

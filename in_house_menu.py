@@ -16,6 +16,8 @@ from urllib.parse import quote_plus as url_quote_plus
 from models import Table, Product, Category, Order, Settings, Employee, OrderStatusHistory
 from dependencies import get_db_session
 from templates import IN_HOUSE_MENU_HTML_TEMPLATE
+# --- НОВИЙ ІМПОРТ: Для розподілу на кухню/бар ---
+from notification_manager import distribute_order_to_production
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -64,11 +66,11 @@ async def get_in_house_menu(access_token: str, request: Request, session: AsyncS
     # Передаємо дані меню в шаблон через JSON
     menu_data = json.dumps({"categories": categories, "products": products})
 
-    # --- NEW: Prepare design/SEO variables ---
+    # --- Design variables ---
     site_title = settings.site_title or "Назва"
     primary_color_val = settings.primary_color or "#5a5a5a"
-    secondary_color_val = settings.secondary_color or "#eeeeee"  # <-- ДОДАНО
-    background_color_val = settings.background_color or "#f4f4f4" # <-- ДОДАНО
+    secondary_color_val = settings.secondary_color or "#eeeeee"
+    background_color_val = settings.background_color or "#f4f4f4"
     font_family_sans_val = settings.font_family_sans or "Golos Text"
     font_family_serif_val = settings.font_family_serif or "Playfair Display"
     # ---------------------------------------
@@ -82,8 +84,8 @@ async def get_in_house_menu(access_token: str, request: Request, session: AsyncS
         seo_description=html_module.escape(settings.seo_description or ""),
         seo_keywords=html_module.escape(settings.seo_keywords or ""),
         primary_color_val=primary_color_val,
-        secondary_color_val=secondary_color_val, # <-- ДОДАНО
-        background_color_val=background_color_val, # <-- ДОДАНО
+        secondary_color_val=secondary_color_val,
+        background_color_val=background_color_val,
         font_family_sans_val=font_family_sans_val,
         font_family_serif_val=font_family_serif_val,
         font_family_sans_encoded=url_quote_plus(font_family_sans_val),
@@ -207,7 +209,6 @@ async def place_in_house_order(table_id: int, items: list = Body(...), session: 
 
     admin_bot = await get_admin_bot(session)
     if not admin_bot:
-        # Незважаючи на помилку бота, замовлення створено. Повертаємо успіх клієнту.
         logger.error(f"Замовлення #{order.id} створено, але адмін-бот недоступний для сповіщення.")
         return JSONResponse(content={"message": "Замовлення прийнято! Очікуйте.", "order_id": order.id})
 
@@ -219,16 +220,13 @@ async def place_in_house_order(table_id: int, items: list = Body(...), session: 
 
 
     try:
+        # 1. Розсилка офіціантам (персонально для цього столика)
         waiters = table.assigned_waiters
-        
         admin_chat_id_str = os.environ.get('ADMIN_CHAT_ID')
         admin_chat_id = None
         if admin_chat_id_str:
-            try:
-                admin_chat_id = int(admin_chat_id_str)
-            except ValueError:
-                logger.warning(f"Некоректний admin_chat_id: {admin_chat_id_str}")
-
+            try: admin_chat_id = int(admin_chat_id_str)
+            except ValueError: pass
 
         waiter_chat_ids = set()
         for w in waiters:
@@ -236,35 +234,32 @@ async def place_in_house_order(table_id: int, items: list = Body(...), session: 
                 waiter_chat_ids.add(w.telegram_user_id)
 
         if waiter_chat_ids:
-            # Надсилаємо сповіщення з кнопкою "Прийняти" усім офіціантам столика
             for chat_id in waiter_chat_ids:
                 try:
                     await admin_bot.send_message(chat_id, order_details_text, reply_markup=kb_waiter.as_markup())
                 except Exception as e:
                     logger.error(f"Не вдалося надіслати нове замовлення офіціанту {chat_id}: {e}")
 
-            # Надсилаємо сповіщення в адмін-чат (якщо він є і це не один з офіціантів)
             if admin_chat_id and admin_chat_id not in waiter_chat_ids:
                 try:
                     await admin_bot.send_message(admin_chat_id, "✅ " + order_details_text, reply_markup=kb_admin.as_markup())
-                except Exception as e:
-                    logger.error(f"Не вдалося надіслати копію замовлення в адмін-чат {admin_chat_id}: {e}")
-
-            return JSONResponse(content={"message": "Замовлення прийнято! Офіціант незабаром його підтвердить.", "order_id": order.id})
-
+                except Exception as e: pass
         else:
-            # Немає офіціантів - надсилаємо лише в адмін-чат
             if admin_chat_id:
                 await admin_bot.send_message(
                     admin_chat_id,
-                    f"❗️ <b>Замовлення з вільного столика {aiogram_html.bold(table.name)} (ID: #{order.id})!</b>\n\n" + order_details_text +
-                    "\n\n<i>(Жоден офіціант не був на зміні або не призначений на цей столик)</i>",
+                    f"❗️ <b>Замовлення з вільного столика {aiogram_html.bold(table.name)} (ID: #{order.id})!</b>\n\n" + order_details_text,
                     reply_markup=kb_admin.as_markup()
                 )
-                return JSONResponse(content={"message": "Замовлення прийнято! Очікуйте.", "order_id": order.id})
-            else:
-                # Критична помилка: нікому відправити
-                logger.error(f"Критична помилка: Немає ані офіціантів, ані адмін-чату для замовлення #{order.id}")
-                raise HTTPException(status_code=503, detail="Не вдалося знайти отримувача для сповіщення.")
+
+        # 2. --- НОВЕ: Розподіл на Кухню та Бар ---
+        # Викликаємо функцію розподілу, яка надішле чеки поварам та барменам
+        try:
+            await distribute_order_to_production(admin_bot, order, session)
+        except Exception as e:
+            logger.error(f"Помилка при розподілі замовлення #{order.id} на кухню/бар: {e}")
+            
+        return JSONResponse(content={"message": "Замовлення прийнято! Офіціант незабаром його підтвердить.", "order_id": order.id})
+
     finally:
         await admin_bot.session.close()

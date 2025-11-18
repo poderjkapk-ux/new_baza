@@ -887,7 +887,7 @@ async def admin_products(page: int = Query(1, ge=1), q: str = Query(None, alias=
         <td><img src="/{p.image_url or ''}" class="table-img" alt="" loading="lazy"> {html.escape(p.name)}</td>
         <td>{p.price} грн</td>
         <td>{html.escape(p.category.name if p.category else '–')}</td>
-        <td>{'✅' if p.is_active else '❌'}</td>
+        <td>{html.escape('🍳 Кухня' if p.preparation_area == 'kitchen' else '🍹 Бар')}</td> <td>{'✅' if p.is_active else '❌'}</td>
         <td class='actions'>
             <a href='/admin/product/toggle_active/{p.id}' class='button-sm'>{'🔴' if p.is_active else '🟢'}</a>
             <a href='/admin/edit_product/{p.id}' class='button-sm'>✏️</a>
@@ -912,6 +912,13 @@ async def admin_products(page: int = Query(1, ge=1), q: str = Query(None, alias=
         <label for="description">Опис:</label><textarea id="description" name="description" rows="4"></textarea>
         <label for="image">Зображення:</label><input type="file" id="image" name="image" accept="image/*">
         <label for="price">Ціна (в грн):</label><input type="number" id="price" name="price" min="1" required>
+        
+        <label for="preparation_area">Цех приготування:</label>
+        <select id="preparation_area" name="preparation_area">
+            <option value="kitchen">🍳 Кухня</option>
+            <option value="bar">🍹 Бар</option>
+        </select>
+        
         <label for="category_id">Категорія:</label><select id="category_id" name="category_id" required>{category_options}</select><button type="submit">Додати страву</button></form></div>
     <div class="card">
         <h2>🛍️ Список страв</h2>
@@ -919,8 +926,8 @@ async def admin_products(page: int = Query(1, ge=1), q: str = Query(None, alias=
             <input type="text" name="search" placeholder="Пошук за назвою..." value="{q or ''}">
             <button type="submit">🔍 Знайти</button>
         </form>
-        <table><thead><tr><th>ID</th><th>Назва</th><th>Ціна</th><th>Категорія</th><th>Статус</th><th>Дії</th></tr></thead><tbody>
-        {product_rows or "<tr><td colspan='6'>Немає страв</td></tr>"}
+        <table><thead><tr><th>ID</th><th>Назва</th><th>Ціна</th><th>Категорія</th><th>Цех</th><th>Статус</th><th>Дії</th></tr></thead><tbody>
+        {product_rows or "<tr><td colspan='7'>Немає страв</td></tr>"}
         </tbody></table>{pagination if pages > 1 else ''}
     </div>"""
 
@@ -937,9 +944,16 @@ async def admin_products(page: int = Query(1, ge=1), q: str = Query(None, alias=
 
 
 @app.post("/admin/add_product")
-async def add_product(name: str=Form(...), price: int=Form(...), description: str=Form(""), category_id: int=Form(...),
-                      image: UploadFile=File(None),
-                      session: AsyncSession=Depends(get_db_session), username: str=Depends(check_credentials)):
+async def add_product(
+    name: str = Form(...), 
+    price: int = Form(...), 
+    description: str = Form(""), 
+    category_id: int = Form(...),
+    preparation_area: str = Form("kitchen"), # <-- NEW FIELD
+    image: UploadFile = File(None),
+    session: AsyncSession = Depends(get_db_session), 
+    username: str = Depends(check_credentials)
+):
     if price <= 0: raise HTTPException(status_code=400, detail="Ціна повинна бути позитивною")
     image_url = None
     if image and image.filename:
@@ -951,7 +965,14 @@ async def add_product(name: str=Form(...), price: int=Form(...), description: st
         except Exception as e:
             logging.error(f"Не вдалося зберегти зображення: {e}")
 
-    session.add(Product(name=name, price=price, description=description, image_url=image_url, category_id=category_id))
+    session.add(Product(
+        name=name, 
+        price=price, 
+        description=description, 
+        image_url=image_url, 
+        category_id=category_id,
+        preparation_area=preparation_area # <-- SAVE FIELD
+    ))
     await session.commit()
     return RedirectResponse(url="/admin/products", status_code=303)
 
@@ -964,6 +985,12 @@ async def get_edit_product_form(product_id: int, session: AsyncSession = Depends
 
     categories_res = await session.execute(sa.select(Category))
     category_options = "".join([f'<option value="{c.id}" {"selected" if c.id == product.category_id else ""}>{html.escape(c.name)}</option>' for c in categories_res.scalars().all()])
+
+    # Select current preparation area
+    prep_options = f"""
+    <option value="kitchen" {'selected' if product.preparation_area == 'kitchen' else ''}>🍳 Кухня</option>
+    <option value="bar" {'selected' if product.preparation_area == 'bar' else ''}>🍹 Бар</option>
+    """
 
     body = f"""
     <div class="card">
@@ -978,6 +1005,12 @@ async def get_edit_product_form(product_id: int, session: AsyncSession = Depends
         {f'<p>Поточне зображення: <img src="/{product.image_url}" class="table-img"></p>' if product.image_url else ''}
         <label for="price">Ціна (в грн):</label>
         <input type="number" id="price" name="price" min="1" value="{product.price}" required>
+        
+        <label for="preparation_area">Цех приготування:</label>
+        <select id="preparation_area" name="preparation_area">
+            {prep_options}
+        </select>
+        
         <label for="category_id">Категорія:</label>
         <select id="category_id" name="category_id" required>{category_options}</select>
         <button type="submit">Зберегти зміни</button>
@@ -994,9 +1027,17 @@ async def get_edit_product_form(product_id: int, session: AsyncSession = Depends
     ))
 
 @app.post("/admin/edit_product/{product_id}")
-async def edit_product(product_id: int, name: str=Form(...), price: int=Form(...), description: str=Form(""), category_id: int=Form(...),
-                      image: UploadFile=File(None),
-                      session: AsyncSession=Depends(get_db_session), username: str=Depends(check_credentials)):
+async def edit_product(
+    product_id: int, 
+    name: str = Form(...), 
+    price: int = Form(...), 
+    description: str = Form(""), 
+    category_id: int = Form(...),
+    preparation_area: str = Form(...), # <-- NEW ARGUMENT
+    image: UploadFile = File(None),
+    session: AsyncSession = Depends(get_db_session), 
+    username: str = Depends(check_credentials)
+):
     product = await session.get(Product, product_id)
     if not product:
         raise HTTPException(status_code=404, detail="Товар не знайдено")
@@ -1005,6 +1046,7 @@ async def edit_product(product_id: int, name: str=Form(...), price: int=Form(...
     product.price = price
     product.description = description
     product.category_id = category_id
+    product.preparation_area = preparation_area # <-- UPDATE FIELD
 
     if image and image.filename:
         if product.image_url and os.path.exists(product.image_url):
@@ -1331,7 +1373,6 @@ async def admin_statuses(error: Optional[str] = None, session: AsyncSession = De
 
     def bool_btn(id, field, val, label=""):
         icon = '✅' if val else '❌'
-        # Для читаемости в таблице делаем кнопку прозрачной
         return f"""
         <form action="/admin/edit_status/{id}" method="post" style="display:inline;">
             <input type="hidden" name="field" value="{field}">
@@ -1355,8 +1396,7 @@ async def admin_statuses(error: Optional[str] = None, session: AsyncSession = De
             <td style="text-align:center; background:#f9f9f9;">{bool_btn(s.id, "visible_to_courier", s.visible_to_courier, "Кур'єр")}</td>
             <td style="text-align:center; background:#f9f9f9;">{bool_btn(s.id, "visible_to_waiter", s.visible_to_waiter, "Офіціант")}</td>
             <td style="text-align:center; background:#f9f9f9;">{bool_btn(s.id, "visible_to_chef", s.visible_to_chef, "Повар (список)")}</td>
-            
-            <td style="text-align:center; border-left: 2px solid #eee;">{bool_btn(s.id, "requires_kitchen_notify", s.requires_kitchen_notify, "Відправити на кухню")}</td>
+            <td style="text-align:center; background:#f9f9f9;">{bool_btn(s.id, "visible_to_bartender", s.visible_to_bartender, "Бармен (список)")}</td> <td style="text-align:center; border-left: 2px solid #eee;">{bool_btn(s.id, "requires_kitchen_notify", s.requires_kitchen_notify, "Відправити на виробництво")}</td>
             <td style="text-align:center;">{bool_btn(s.id, "notify_customer", s.notify_customer, "Сповістити клієнта")}</td>
             
             <td style="text-align:center; background:#fff0f0;">{bool_btn(s.id, "is_completed_status", s.is_completed_status, "Фінальний успіх")}</td>
@@ -1368,8 +1408,9 @@ async def admin_statuses(error: Optional[str] = None, session: AsyncSession = De
         </tr>
         """
 
-    rows_html = rows if rows else "<tr><td colspan='11'>Немає статусів</td></tr>"
+    rows_html = rows if rows else "<tr><td colspan='12'>Немає статусів</td></tr>"
     
+    # Update colspan and column headers
     body = f"""
     {error_html}
     <style>
@@ -1390,10 +1431,9 @@ async def admin_statuses(error: Optional[str] = None, session: AsyncSession = De
             <div class="checkbox-group"><input type="checkbox" id="vc" name="visible_to_courier" value="true"><label for="vc">Бачить Кур'єр</label></div>
             <div class="checkbox-group"><input type="checkbox" id="vw" name="visible_to_waiter" value="true"><label for="vw">Бачить Офіціант</label></div>
             <div class="checkbox-group"><input type="checkbox" id="vch" name="visible_to_chef" value="true"><label for="vch">Бачить Повар</label></div>
-
-            <div class="checkbox-group" style="background: #e8f5e9; padding: 5px; border-radius: 5px;">
+            <div class="checkbox-group"><input type="checkbox" id="vbart" name="visible_to_bartender" value="true"><label for="vbart">Бачить Бармен</label></div> <div class="checkbox-group" style="background: #e8f5e9; padding: 5px; border-radius: 5px;">
                 <input type="checkbox" id="rkn" name="requires_kitchen_notify" value="true">
-                <label for="rkn">🔔 <b>Відправляти на кухню</b></label>
+                <label for="rkn">🔔 <b>Відправляти на виробництво</b></label>
             </div>
             <div class="checkbox-group"><input type="checkbox" id="nc" name="notify_customer" value="true" checked><label for="nc">🔔 Сповіщати клієнта</label></div>
             
@@ -1414,14 +1454,12 @@ async def admin_statuses(error: Optional[str] = None, session: AsyncSession = De
                     <tr>
                         <th rowspan="2">ID</th>
                         <th rowspan="2">Назва</th>
-                        <th colspan="4" class="group-header">👁️ Хто бачить у списку</th>
-                        <th colspan="2" class="group-header">🔔 Дії при переході</th>
+                        <th colspan="5" class="group-header">👁️ Хто бачить у списку</th> <th colspan="2" class="group-header">🔔 Дії при переході</th>
                         <th colspan="2" class="group-header">🏁 Системні</th>
                         <th rowspan="2">Дії</th>
                     </tr>
                     <tr>
-                        <th>Опер.</th><th>Кур'єр</th><th>Офіц.</th><th>Повар</th>
-                        <th style="border-left: 2px solid #ccc;">На кухню</th><th>Клієнту</th>
+                        <th>Опер.</th><th>Кур'єр</th><th>Офіц.</th><th>Повар</th><th>Бармен</th> <th style="border-left: 2px solid #ccc;">На виробництво</th><th>Клієнту</th>
                         <th>Успіх</th><th>Відміна</th>
                     </tr>
                 </thead>
@@ -1429,12 +1467,12 @@ async def admin_statuses(error: Optional[str] = None, session: AsyncSession = De
             </table>
         </div>
         <p style="margin-top: 10px; font-size: 0.9rem; color: #666;">
-            * <b>На кухню</b>: Якщо увімкнено, при переході в цей статус повар отримає сповіщення з замовленням.<br>
+            * <b>На виробництво</b>: Якщо увімкнено, при переході в цей статус **повару та бармену** буде відправлено розділений чек.<br>
             * <b>Хто бачить</b>: Чи відображається замовлення з таким статусом у списку відповідного працівника.
         </p>
     </div>
     """
-    active_classes = {key: "" for key in ["main_active", "orders_active", "clients_active", "tables_active", "products_active", "categories_active", "menu_active", "employees_active", "reports_active", "settings_active", "design_active"]}
+    active_classes = {key: "" for key in ["main_active", "orders_active", "clients_active", "tables_active", "products_active", "categories_active", "menu_active", "employees_active", "statuses_active", "reports_active", "settings_active", "design_active"]}
     active_classes["statuses_active"] = "active"
     return HTMLResponse(ADMIN_HTML_TEMPLATE.format(
         title="Статуси замовлень", 
@@ -1451,7 +1489,8 @@ async def add_status(
     visible_to_courier: Optional[bool] = Form(False),
     visible_to_waiter: Optional[bool] = Form(False),
     visible_to_chef: Optional[bool] = Form(False),
-    requires_kitchen_notify: Optional[bool] = Form(False), # <--- НОВЕ ПОЛЕ
+    visible_to_bartender: Optional[bool] = Form(False), # <--- NEW FIELD
+    requires_kitchen_notify: Optional[bool] = Form(False),
     is_completed_status: Optional[bool] = Form(False),
     is_cancelled_status: Optional[bool] = Form(False),
     session: AsyncSession = Depends(get_db_session),
@@ -1464,7 +1503,8 @@ async def add_status(
         visible_to_courier=bool(visible_to_courier),
         visible_to_waiter=bool(visible_to_waiter),
         visible_to_chef=bool(visible_to_chef),
-        requires_kitchen_notify=bool(requires_kitchen_notify), # <--- ЗБЕРЕЖЕННЯ
+        visible_to_bartender=bool(visible_to_bartender), # <--- SAVE NEW FIELD
+        requires_kitchen_notify=bool(requires_kitchen_notify),
         is_completed_status=bool(is_completed_status),
         is_cancelled_status=bool(is_cancelled_status)
     )
@@ -1485,10 +1525,10 @@ async def edit_status(
     if not status_to_edit:
         raise HTTPException(status_code=404, detail="Статус не знайдено")
 
-    # Список дозволених полів для редагування через AJAX/Форму
     allowed_fields = [
         "notify_customer", "visible_to_operator", "visible_to_courier", 
-        "visible_to_waiter", "visible_to_chef", "requires_kitchen_notify", 
+        "visible_to_waiter", "visible_to_chef", "visible_to_bartender", # <--- ADD NEW FIELD
+        "requires_kitchen_notify", 
         "is_completed_status", "is_cancelled_status"
     ]
 
@@ -1523,6 +1563,7 @@ async def admin_roles(session: AsyncSession = Depends(get_db_session), username:
     roles_res = await session.execute(sa.select(Role).order_by(Role.id))
     roles = roles_res.scalars().all()
 
+    # NOTE: The models.py was updated with can_receive_bar_orders. We must ensure it's loaded.
     rows = "".join([f"""
     <tr>
         <td>{r.id}</td>
@@ -1531,15 +1572,16 @@ async def admin_roles(session: AsyncSession = Depends(get_db_session), username:
         <td>{'✅' if r.can_be_assigned else '❌'}</td>
         <td>{'✅' if r.can_serve_tables else '❌'}</td>
         <td>{'✅' if r.can_receive_kitchen_orders else '❌'}</td>
-        <td class="actions">
+        <td>{'✅' if r.can_receive_bar_orders else '❌'}</td> <td class="actions">
             <a href="/admin/edit_role/{r.id}" class="button-sm">✏️</a>
             <a href="/admin/delete_role/{r.id}" onclick="return confirm('Ви впевнені?');" class='button-sm danger'>🗑️</a>
         </td>
     </tr>""" for r in roles])
 
     if not rows:
-        rows = "<tr><td colspan='7'>Немає ролей</td></tr>"
+        rows = "<tr><td colspan='8'>Немає ролей</td></tr>" # Colspan adjusted
 
+    # Update HTML form to include Barman checkbox
     body = f"""
     <div class="card">
         <ul class="nav-tabs">
@@ -1565,18 +1607,20 @@ async def admin_roles(session: AsyncSession = Depends(get_db_session), username:
                 <input type="checkbox" id="can_receive_kitchen_orders" name="can_receive_kitchen_orders" value="true">
                 <label for="can_receive_kitchen_orders">Отримує замовлення для приготування (Повар)</label>
             </div>
+             <div class="checkbox-group">
+                <input type="checkbox" id="can_receive_bar_orders" name="can_receive_bar_orders" value="true">
+                <label for="can_receive_bar_orders">Отримує замовлення для бару (Бармен)</label> </div>
             <button type="submit">Додати роль</button>
         </form>
     </div>
     <div class="card">
         <h2>Список ролей</h2>
-        <table><thead><tr><th>ID</th><th>Назва</th><th>Керув. замовл.</th><th>Признач. доставку</th><th>Обслуг. столики</th><th>Кухня</th><th>Дії</th></tr></thead><tbody>
-        {rows}
+        <table><thead><tr><th>ID</th><th>Назва</th><th>Керув. замовл.</th><th>Признач. доставку</th><th>Обслуг. столики</th><th>Кухня</th><th>Бар</th><th>Дії</th></tr></thead><tbody> {rows}
         </tbody></table>
     </div>
     """
     active_classes = {key: "" for key in ["main_active", "orders_active", "clients_active", "tables_active", "products_active", "categories_active", "menu_active", "statuses_active", "reports_active", "settings_active", "design_active"]}
-    active_classes["employees_active"] = "active" # Part of employees section
+    active_classes["employees_active"] = "active"
     return HTMLResponse(ADMIN_HTML_TEMPLATE.format(
         title="Ролі співробітників", 
         body=body, 
@@ -1589,14 +1633,16 @@ async def add_role(name: str = Form(...),
                    can_manage_orders: Optional[bool] = Form(False),
                    can_be_assigned: Optional[bool] = Form(False),
                    can_serve_tables: Optional[bool] = Form(False),
-                   can_receive_kitchen_orders: Optional[bool] = Form(False), # <-- ЗБЕРІГАННЯ НОВОГО ПОЛЯ
+                   can_receive_kitchen_orders: Optional[bool] = Form(False), 
+                   can_receive_bar_orders: Optional[bool] = Form(False), # <--- SAVE NEW FIELD
                    session: AsyncSession = Depends(get_db_session),
                    username: str = Depends(check_credentials)):
     new_role = Role(name=name,
                     can_manage_orders=bool(can_manage_orders),
                     can_be_assigned=bool(can_be_assigned),
                     can_serve_tables=bool(can_serve_tables),
-                    can_receive_kitchen_orders=bool(can_receive_kitchen_orders)) # <-- ЗБЕРІГАННЯ НОВОГО ПОЛЯ
+                    can_receive_kitchen_orders=bool(can_receive_kitchen_orders),
+                    can_receive_bar_orders=bool(can_receive_bar_orders)) # <--- SAVE NEW FIELD
     session.add(new_role)
     await session.commit()
     return RedirectResponse(url="/admin/roles", status_code=303)
@@ -1608,6 +1654,7 @@ async def get_edit_role_form(role_id: int, session: AsyncSession = Depends(get_d
     role = await session.get(Role, role_id)
     if not role: raise HTTPException(status_code=404, detail="Роль не знайдено")
 
+    # Update HTML to include Barman checkbox
     body = f"""
     <div class="card">
         <ul class="nav-tabs"><li class="nav-item"><a href="/admin/employees">Співробітники</a></li><li class="nav-item"><a href="/admin/roles" class="active">Ролі</a></li></ul>
@@ -1630,6 +1677,9 @@ async def get_edit_role_form(role_id: int, session: AsyncSession = Depends(get_d
                 <input type="checkbox" id="can_receive_kitchen_orders" name="can_receive_kitchen_orders" value="true" {'checked' if role.can_receive_kitchen_orders else ''}>
                 <label for="can_receive_kitchen_orders">Отримує замовлення для приготування (Повар)</label>
             </div>
+            <div class="checkbox-group">
+                <input type="checkbox" id="can_receive_bar_orders" name="can_receive_bar_orders" value="true" {'checked' if role.can_receive_bar_orders else ''}>
+                <label for="can_receive_bar_orders">Отримує замовлення для бару (Бармен)</label> </div>
             <button type="submit">Зберегти зміни</button>
              <a href="/admin/roles" class="button secondary">Скасувати</a>
         </form>
@@ -1644,16 +1694,18 @@ async def get_edit_role_form(role_id: int, session: AsyncSession = Depends(get_d
     ))
 
 @app.post("/admin/edit_role/{role_id}")
-async def edit_role(role_id: int, name: str = Form(...), can_manage_orders: Optional[bool] = Form(False), can_be_assigned: Optional[bool] = Form(False), can_serve_tables: Optional[bool] = Form(False), can_receive_kitchen_orders: Optional[bool] = Form(False), session: AsyncSession = Depends(get_db_session), username: str = Depends(check_credentials)):
+async def edit_role(role_id: int, name: str = Form(...), can_manage_orders: Optional[bool] = Form(False), can_be_assigned: Optional[bool] = Form(False), can_serve_tables: Optional[bool] = Form(False), can_receive_kitchen_orders: Optional[bool] = Form(False), can_receive_bar_orders: Optional[bool] = Form(False), session: AsyncSession = Depends(get_db_session), username: str = Depends(check_credentials)):
     role = await session.get(Role, role_id)
     if role:
         role.name = name
         role.can_manage_orders = bool(can_manage_orders)
         role.can_be_assigned = bool(can_be_assigned)
         role.can_serve_tables = bool(can_serve_tables)
-        role.can_receive_kitchen_orders = bool(can_receive_kitchen_orders) # <-- ЗБЕРІГАННЯ НОВОГО ПОЛЯ
+        role.can_receive_kitchen_orders = bool(can_receive_kitchen_orders)
+        role.can_receive_bar_orders = bool(can_receive_bar_orders) # <--- SAVE NEW FIELD
         await session.commit()
     return RedirectResponse(url="/admin/roles", status_code=303)
+
 
 @app.get("/admin/delete_role/{role_id}")
 async def delete_role(role_id: int, session: AsyncSession = Depends(get_db_session), username: str = Depends(check_credentials)):
