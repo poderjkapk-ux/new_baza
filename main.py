@@ -1327,105 +1327,111 @@ async def admin_statuses(error: Optional[str] = None, session: AsyncSession = De
 
     error_html = ""
     if error == "in_use":
-        error_html = "<div class='card' style='background-color: #f8d7da; color: #721c24;'><strong>Помилка!</strong> Неможливо видалити статус, оскільки він використовується в існуючих замовленнях.</div>"
+        error_html = "<div class='card' style='background-color: #f8d7da; color: #721c24;'><strong>Помилка!</strong> Неможливо видалити статус, оскільки він використовується.</div>"
 
-    def bool_to_icon(val):
-        return '✅' if val else '❌'
+    def bool_btn(id, field, val, label=""):
+        icon = '✅' if val else '❌'
+        # Для читаемости в таблице делаем кнопку прозрачной
+        return f"""
+        <form action="/admin/edit_status/{id}" method="post" style="display:inline;">
+            <input type="hidden" name="field" value="{field}">
+            <input type="hidden" name="value" value="{'false' if val else 'true'}">
+            <button type="submit" class="button-sm" style="background:none; border:none; cursor:pointer;" title="{label}">{icon}</button>
+        </form>
+        """
 
-    rows = "".join([f"""
-    <tr>
-        <td>{s.id}</td>
-        <td><form action="/admin/edit_status/{s.id}" method="post" class="inline-form">
-            <input type="text" name="name" value="{html.escape(s.name)}" style="width: 150px;" required>
-            <button type="submit">💾</button>
-        </form></td>
-        <td>
-            <form action="/admin/edit_status/{s.id}" method="post" class="inline-form">
-                <input type="hidden" name="name" value="{html.escape(s.name)}">
-                <input type="hidden" name="field" value="notify_customer">
-                <input type="hidden" name="value" value="{'false' if s.notify_customer else 'true'}">
-                <button type="submit" class="button-sm" style="background-color: transparent; color: inherit; padding: 0;">{bool_to_icon(s.notify_customer)}</button>
-            </form>
-        </td>
-        <td>
-            <form action="/admin/edit_status/{s.id}" method="post" class="inline-form">
-                <input type="hidden" name="name" value="{html.escape(s.name)}">
-                <input type="hidden" name="field" value="visible_to_operator">
-                <input type="hidden" name="value" value="{'false' if s.visible_to_operator else 'true'}">
-                <button type="submit" class="button-sm" style="background-color: transparent; color: inherit; padding: 0;">{bool_to_icon(s.visible_to_operator)}</button>
-            </form>
-        </td>
-        <td>
-            <form action="/admin/edit_status/{s.id}" method="post" class="inline-form">
-                <input type="hidden" name="name" value="{html.escape(s.name)}">
-                <input type="hidden" name="field" value="visible_to_courier">
-                <input type="hidden" name="value" value="{'false' if s.visible_to_courier else 'true'}">
-                <button type="submit" class="button-sm" style="background-color: transparent; color: inherit; padding: 0;">{bool_to_icon(s.visible_to_courier)}</button>
-            </form>
-        </td>
-        <td>
-            <form action="/admin/edit_status/{s.id}" method="post" class="inline-form">
-                <input type="hidden" name="name" value="{html.escape(s.name)}">
-                <input type="hidden" name="field" value="visible_to_waiter">
-                <input type="hidden" name="value" value="{'false' if s.visible_to_waiter else 'true'}">
-                <button type="submit" class="button-sm" style="background-color: transparent; color: inherit; padding: 0;">{bool_to_icon(s.visible_to_waiter)}</button>
-            </form>
-        </td>
-        <td>
-            <form action="/admin/edit_status/{s.id}" method="post" class="inline-form">
-                <input type="hidden" name="name" value="{html.escape(s.name)}">
-                <input type="hidden" name="field" value="visible_to_chef">
-                <input type="hidden" name="value" value="{'false' if s.visible_to_chef else 'true'}">
-                <button type="submit" class="button-sm" style="background-color: transparent; color: inherit; padding: 0;">{bool_to_icon(s.visible_to_chef)}</button>
-            </form>
-        </td>
-        <td>
-            <form action="/admin/edit_status/{s.id}" method="post" class="inline-form">
-                <input type="hidden" name="name" value="{html.escape(s.name)}">
-                <input type="hidden" name="field" value="is_completed_status">
-                <input type="hidden" name="value" value="{'false' if s.is_completed_status else 'true'}">
-                <button type="submit" class="button-sm" style="background-color: transparent; color: inherit; padding: 0;">{bool_to_icon(s.is_completed_status)}</button>
-            </form>
-        </td>
-        <td>
-            <form action="/admin/edit_status/{s.id}" method="post" class="inline-form">
-                <input type="hidden" name="name" value="{html.escape(s.name)}">
-                <input type="hidden" name="field" value="is_cancelled_status">
-                <input type="hidden" name="value" value="{'false' if s.is_cancelled_status else 'true'}">
-                <button type="submit" class="button-sm" style="background-color: transparent; color: inherit; padding: 0;">{bool_to_icon(s.is_cancelled_status)}</button>
-            </form>
-        </td>
-        <td class="actions">
-            <a href="/admin/delete_status/{s.id}" onclick="return confirm('Ви впевнені?');" class="button-sm danger">🗑️</a>
-        </td>
-    </tr>
-    """ for s in statuses])
+    rows = ""
+    for s in statuses:
+        rows += f"""
+        <tr>
+            <td>{s.id}</td>
+            <td>
+                <form action="/admin/edit_status/{s.id}" method="post" class="inline-form">
+                    <input type="text" name="name" value="{html.escape(s.name)}" style="width: 140px; padding: 5px;" required>
+                    <button type="submit" class="button-sm">💾</button>
+                </form>
+            </td>
+            <td style="text-align:center; background:#f9f9f9;">{bool_btn(s.id, "visible_to_operator", s.visible_to_operator, "Оператор")}</td>
+            <td style="text-align:center; background:#f9f9f9;">{bool_btn(s.id, "visible_to_courier", s.visible_to_courier, "Кур'єр")}</td>
+            <td style="text-align:center; background:#f9f9f9;">{bool_btn(s.id, "visible_to_waiter", s.visible_to_waiter, "Офіціант")}</td>
+            <td style="text-align:center; background:#f9f9f9;">{bool_btn(s.id, "visible_to_chef", s.visible_to_chef, "Повар (список)")}</td>
+            
+            <td style="text-align:center; border-left: 2px solid #eee;">{bool_btn(s.id, "requires_kitchen_notify", s.requires_kitchen_notify, "Відправити на кухню")}</td>
+            <td style="text-align:center;">{bool_btn(s.id, "notify_customer", s.notify_customer, "Сповістити клієнта")}</td>
+            
+            <td style="text-align:center; background:#fff0f0;">{bool_btn(s.id, "is_completed_status", s.is_completed_status, "Фінальний успіх")}</td>
+            <td style="text-align:center; background:#fff0f0;">{bool_btn(s.id, "is_cancelled_status", s.is_cancelled_status, "Скасування")}</td>
+            
+            <td class="actions">
+                <a href="/admin/delete_status/{s.id}" onclick="return confirm('Ви впевнені?');" class="button-sm danger">🗑️</a>
+            </td>
+        </tr>
+        """
 
-    rows_status = "".join(rows) if rows else "<tr><td colspan='10'>Немає статусів</td></tr>"
+    rows_html = rows if rows else "<tr><td colspan='11'>Немає статусів</td></tr>"
     
     body = f"""
     {error_html}
+    <style>
+        .status-table th {{ font-size: 0.8rem; text-align: center; vertical-align: middle; }}
+        .status-table td {{ vertical-align: middle; }}
+        .group-header {{ background-color: #e0e0e0; text-align: center; font-weight: bold; font-size: 0.85rem; }}
+    </style>
+
     <div class="card">
         <h2>Додати новий статус</h2>
-        <form action="/admin/add_status" method="post">
-            <label for="name">Назва статусу:</label>
-            <input type="text" name="name" placeholder="Назва статусу" required>
-            <div class="checkbox-group"><input type="checkbox" id="notify_customer" name="notify_customer" value="true" checked><label for="notify_customer">Сповіщати клієнта</label></div>
-            <div class="checkbox-group"><input type="checkbox" id="visible_to_operator" name="visible_to_operator" value="true" checked><label for="visible_to_operator">Показувати оператору</label></div>
-            <div class="checkbox-group"><input type="checkbox" id="visible_to_courier" name="visible_to_courier" value="true"><label for="visible_to_courier">Показувати кур'єру</label></div>
-            <div class="checkbox-group"><input type="checkbox" id="visible_to_waiter" name="visible_to_waiter" value="true"><label for="visible_to_waiter">Показувати офіціанту</label></div>
-            <div class="checkbox-group"><input type="checkbox" id="visible_to_chef" name="visible_to_chef" value="true"><label for="visible_to_chef">Показувати повару</label></div>
-            <div class="checkbox-group"><input type="checkbox" id="is_completed_status" name="is_completed_status" value="true"><label for="is_completed_status">Цей статус ЗАВЕРШУЄ замовлення</label></div>
-            <div class="checkbox-group"><input type="checkbox" id="is_cancelled_status" name="is_cancelled_status" value="true"><label for="is_cancelled_status">Цей статус СКАСОВУЄ замовлення</label></div>
-            <button type="submit">Додати</button>
+        <form action="/admin/add_status" method="post" class="form-grid" style="grid-template-columns: 1fr 1fr 1fr; gap: 10px; align-items: end;">
+            <div style="grid-column: span 3;">
+                <label>Назва статусу:</label>
+                <input type="text" name="name" placeholder="Наприклад: Готується" required>
+            </div>
+            
+            <div class="checkbox-group"><input type="checkbox" id="vo" name="visible_to_operator" value="true" checked><label for="vo">Бачить Оператор</label></div>
+            <div class="checkbox-group"><input type="checkbox" id="vc" name="visible_to_courier" value="true"><label for="vc">Бачить Кур'єр</label></div>
+            <div class="checkbox-group"><input type="checkbox" id="vw" name="visible_to_waiter" value="true"><label for="vw">Бачить Офіціант</label></div>
+            <div class="checkbox-group"><input type="checkbox" id="vch" name="visible_to_chef" value="true"><label for="vch">Бачить Повар</label></div>
+
+            <div class="checkbox-group" style="background: #e8f5e9; padding: 5px; border-radius: 5px;">
+                <input type="checkbox" id="rkn" name="requires_kitchen_notify" value="true">
+                <label for="rkn">🔔 <b>Відправляти на кухню</b></label>
+            </div>
+            <div class="checkbox-group"><input type="checkbox" id="nc" name="notify_customer" value="true" checked><label for="nc">🔔 Сповіщати клієнта</label></div>
+            
+            <div class="checkbox-group"><input type="checkbox" id="ics" name="is_completed_status" value="true"><label for="ics">🏁 Завершує (Успіх)</label></div>
+            <div class="checkbox-group"><input type="checkbox" id="ican" name="is_cancelled_status" value="true"><label for="ican">🚫 Скасовує</label></div>
+
+            <div style="grid-column: span 3; text-align: right;">
+                <button type="submit">Додати статус</button>
+            </div>
         </form>
     </div>
+
     <div class="card">
-        <h2>Список статусів</h2>
-        <table>
-            <thead><tr><th>ID</th><th>Назва</th><th>Сповіщ.</th><th>Оператору</th><th>Кур'єру</th><th>Офіціанту</th><th>Повару</th><th>Завершує</th><th>Скасовує</th><th>Дії</th></tr></thead>
-            <tbody>{rows_status}</tbody>
-        </table>
+        <h2>Список статусів та налаштування</h2>
+        <div class="table-wrapper">
+            <table class="status-table">
+                <thead>
+                    <tr>
+                        <th rowspan="2">ID</th>
+                        <th rowspan="2">Назва</th>
+                        <th colspan="4" class="group-header">👁️ Хто бачить у списку</th>
+                        <th colspan="2" class="group-header">🔔 Дії при переході</th>
+                        <th colspan="2" class="group-header">🏁 Системні</th>
+                        <th rowspan="2">Дії</th>
+                    </tr>
+                    <tr>
+                        <th>Опер.</th><th>Кур'єр</th><th>Офіц.</th><th>Повар</th>
+                        <th style="border-left: 2px solid #ccc;">На кухню</th><th>Клієнту</th>
+                        <th>Успіх</th><th>Відміна</th>
+                    </tr>
+                </thead>
+                <tbody>{rows_html}</tbody>
+            </table>
+        </div>
+        <p style="margin-top: 10px; font-size: 0.9rem; color: #666;">
+            * <b>На кухню</b>: Якщо увімкнено, при переході в цей статус повар отримає сповіщення з замовленням.<br>
+            * <b>Хто бачить</b>: Чи відображається замовлення з таким статусом у списку відповідного працівника.
+        </p>
     </div>
     """
     active_classes = {key: "" for key in ["main_active", "orders_active", "clients_active", "tables_active", "products_active", "categories_active", "menu_active", "employees_active", "reports_active", "settings_active", "design_active"]}
@@ -1444,7 +1450,8 @@ async def add_status(
     visible_to_operator: Optional[bool] = Form(False),
     visible_to_courier: Optional[bool] = Form(False),
     visible_to_waiter: Optional[bool] = Form(False),
-    visible_to_chef: Optional[bool] = Form(False), # <-- НОВЕ ПОЛЕ
+    visible_to_chef: Optional[bool] = Form(False),
+    requires_kitchen_notify: Optional[bool] = Form(False), # <--- НОВЕ ПОЛЕ
     is_completed_status: Optional[bool] = Form(False),
     is_cancelled_status: Optional[bool] = Form(False),
     session: AsyncSession = Depends(get_db_session),
@@ -1456,7 +1463,8 @@ async def add_status(
         visible_to_operator=bool(visible_to_operator),
         visible_to_courier=bool(visible_to_courier),
         visible_to_waiter=bool(visible_to_waiter),
-        visible_to_chef=bool(visible_to_chef), # <-- ЗБЕРІГАННЯ НОВОГО ПОЛЯ
+        visible_to_chef=bool(visible_to_chef),
+        requires_kitchen_notify=bool(requires_kitchen_notify), # <--- ЗБЕРЕЖЕННЯ
         is_completed_status=bool(is_completed_status),
         is_cancelled_status=bool(is_cancelled_status)
     )
@@ -1477,9 +1485,16 @@ async def edit_status(
     if not status_to_edit:
         raise HTTPException(status_code=404, detail="Статус не знайдено")
 
+    # Список дозволених полів для редагування через AJAX/Форму
+    allowed_fields = [
+        "notify_customer", "visible_to_operator", "visible_to_courier", 
+        "visible_to_waiter", "visible_to_chef", "requires_kitchen_notify", 
+        "is_completed_status", "is_cancelled_status"
+    ]
+
     if name and not field:
         status_to_edit.name = name
-    elif field in ["notify_customer", "visible_to_operator", "visible_to_courier", "visible_to_waiter", "visible_to_chef", "is_completed_status", "is_cancelled_status"]:
+    elif field in allowed_fields:
         setattr(status_to_edit, field, value.lower() == 'true')
 
     await session.commit()

@@ -5,7 +5,6 @@ from aiogram import Bot, html
 from aiogram.utils.keyboard import InlineKeyboardBuilder, InlineKeyboardButton
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from urllib.parse import quote_plus
 
 from models import Order, Settings, OrderStatus, Employee, Role
 
@@ -35,7 +34,7 @@ async def notify_new_order_to_staff(admin_bot: Bot, order: Order, session: Async
                   f"<b>Сума:</b> {order.total_price} грн\n\n"
                   f"<b>Статус:</b> {status_name}")
 
-    # --- КЛАВІАТУРА ДЛЯ ОПЕРАТОРА (залишається незмінною) ---
+    # --- КЛАВІАТУРА ДЛЯ ОПЕРАТОРА ---
     kb_admin = InlineKeyboardBuilder()
     statuses_res = await session.execute(
         select(OrderStatus).where(OrderStatus.visible_to_operator == True).order_by(OrderStatus.id)
@@ -50,9 +49,7 @@ async def notify_new_order_to_staff(admin_bot: Bot, order: Order, session: Async
     kb_admin.row(InlineKeyboardButton(text="✏️ Редагувати замовлення", callback_data=f"edit_order_{order.id}"))
     # --------------------------------------------------------
 
-    # 1. Відправка в загальний адмін-чат та операторам (якщо вони на зміні)
-    
-    # Визначення ID операторів та адмін-чату
+    # 1. Відправка в загальний адмін-чат та операторам
     target_chat_ids = set()
     if admin_chat_id_str:
         try:
@@ -74,46 +71,56 @@ async def notify_new_order_to_staff(admin_bot: Bot, order: Order, session: Async
         if operator.telegram_user_id not in target_chat_ids:
             target_chat_ids.add(operator.telegram_user_id)
             
-    # Відправка
     for chat_id in target_chat_ids:
         try:
             await admin_bot.send_message(chat_id, admin_text, reply_markup=kb_admin.as_markup())
         except Exception as e:
             logger.error(f"Не вдалося відправити нове замовлення оператору/адміну {chat_id}: {e}")
 
-    # 2. СПОВІЩЕННЯ ПОВАРІВ (Кухня) — якщо поточний статус вимагає сповіщення кухні
+    # 2. СПОВІЩЕННЯ ПОВАРІВ (Якщо статус вимагає цього при створенні)
     if order.status and order.status.requires_kitchen_notify:
-        chef_roles_res = await session.execute(select(Role.id).where(Role.can_receive_kitchen_orders == True))
-        chef_role_ids = chef_roles_res.scalars().all()
+        await send_order_to_kitchen(admin_bot, order, session)
 
-        if chef_role_ids:
-            chefs_on_shift_res = await session.execute(
-                select(Employee).where(
-                    Employee.role_id.in_(chef_role_ids),
-                    Employee.is_on_shift == True,
-                    Employee.telegram_user_id.is_not(None)
-                )
-            )
-            chefs = chefs_on_shift_res.scalars().all()
 
-            if chefs:
-                # Текст для повара має бути максимально простим і фокусуватися на стравах
-                chef_text = (f"🧑‍🍳 <b>НОВЕ ЗАМОВЛЕННЯ ДЛЯ КУХНІ: #{order.id}</b>\n"
-                             f"<b>Тип:</b> {'Доставка' if is_delivery else 'В закладі / Самовивіз'}\n"
-                             f"<b>Час:</b> {html.quote(order.delivery_time)}\n\n"
-                             f"<b>СКЛАД:</b>\n{products_formatted}\n\n"
-                             f"<i>Натисніть 'Видача', коли замовлення буде готове.</i>")
-                
-                kb_chef = InlineKeyboardBuilder()
-                kb_chef.row(InlineKeyboardButton(text="✅ Видача", callback_data=f"chef_ready_{order.id}"))
-                
-                for chef in chefs:
-                    try:
-                        await admin_bot.send_message(chef.telegram_user_id, chef_text, reply_markup=kb_chef.as_markup())
-                    except Exception as e:
-                        logger.error(f"Не вдалося відправити замовлення повару {chef.id} ({chef.telegram_user_id}): {e}")
-            else:
-                logger.warning(f"Нове замовлення #{order.id}, але немає поварів на зміні. Сповіщення кухні скасовано.")
+async def send_order_to_kitchen(bot: Bot, order: Order, session: AsyncSession):
+    """
+    Окрема функція для відправки чека на кухню (поварам).
+    """
+    chef_roles_res = await session.execute(select(Role.id).where(Role.can_receive_kitchen_orders == True))
+    chef_role_ids = chef_roles_res.scalars().all()
+
+    if not chef_role_ids:
+        return
+
+    chefs_on_shift_res = await session.execute(
+        select(Employee).where(
+            Employee.role_id.in_(chef_role_ids),
+            Employee.is_on_shift == True,
+            Employee.telegram_user_id.is_not(None)
+        )
+    )
+    chefs = chefs_on_shift_res.scalars().all()
+
+    if chefs:
+        products_formatted = "- " + html.quote(order.products or '').replace(", ", "\n- ")
+        is_delivery = order.is_delivery
+        
+        chef_text = (f"🧑‍🍳 <b>ЗАМОВЛЕННЯ НА КУХНЮ: #{order.id}</b>\n"
+                     f"<b>Тип:</b> {'Доставка' if is_delivery else 'В закладі / Самовивіз'}\n"
+                     f"<b>Час:</b> {html.quote(order.delivery_time)}\n\n"
+                     f"<b>СКЛАД:</b>\n{products_formatted}\n\n"
+                     f"<i>Натисніть 'Видача', коли замовлення буде готове.</i>")
+        
+        kb_chef = InlineKeyboardBuilder()
+        kb_chef.row(InlineKeyboardButton(text=f"✅ Видача #{order.id}", callback_data=f"chef_ready_{order.id}"))
+        
+        for chef in chefs:
+            try:
+                await bot.send_message(chef.telegram_user_id, chef_text, reply_markup=kb_chef.as_markup())
+            except Exception as e:
+                logger.error(f"Не вдалося відправити замовлення повару {chef.id}: {e}")
+    else:
+        logger.warning(f"Замовлення #{order.id} потребує кухні, але немає поварів на зміні.")
 
 
 async def notify_all_parties_on_status_change(
@@ -132,7 +139,7 @@ async def notify_all_parties_on_status_change(
     
     new_status = order.status
     
-    # 1. Сповіщення в головний АДМІН-ЧАТ
+    # 1. Сповіщення в головний АДМІН-ЧАТ (Лог)
     if admin_chat_id_str:
         log_message = (
             f"🔄 <b>[Статус змінено]</b> Замовлення #{order.id}\n"
@@ -142,31 +149,33 @@ async def notify_all_parties_on_status_change(
         try:
             await admin_bot.send_message(admin_chat_id_str, log_message)
         except Exception as e:
-            logger.error(f"Не вдалося відправити лог про зміну статусу в адмін-чат {admin_chat_id_str}: {e}")
+            logger.error(f"Не вдалося відправити лог в адмін-чат: {e}")
 
+    # 2. ЛОГІКА ДЛЯ КУХНІ: Якщо новий статус вимагає оповіщення кухні
+    # І старий статус НЕ вимагав (щоб не дублювати, якщо міняємо шило на мило)
+    # Або якщо ми просто хочемо гарантувати відправку
+    if new_status.requires_kitchen_notify:
+        # Перевіряємо, чи не було це замовлення щойно створено (щоб уникнути дубля при створенні)
+        # Але notify_new_order_to_staff викликається тільки при створенні. 
+        # Тут ми точно знаємо, що це зміна статусу.
+        await send_order_to_kitchen(admin_bot, order, session)
 
-    # 2. СПОВІЩЕННЯ ПІД ЧАС ВИДАЧІ (Тільки при переході в "Готовий до видачі")
+    # 3. СПОВІЩЕННЯ ПІД ЧАС ВИДАЧІ ("Готовий до видачі")
     if new_status.name == "Готовий до видачі":
         ready_message = f"📢 <b>ЗАМОВЛЕННЯ ГОТОВЕ ДО ВИДАЧІ: #{order.id}</b>! \n"
         
-        # Визначаємо, кому видавати (Офіціант чи Кур'єр)
         target_employees = []
-        
         if order.order_type == 'in_house' and order.accepted_by_waiter and order.accepted_by_waiter.is_on_shift:
-            # ОПОВІЩЕННЯ ОФІЦІАНТА
             target_employees.append(order.accepted_by_waiter)
             ready_message += f"Стіл: {html.quote(order.table.name if order.table else 'N/A')}. Прийняв: {html.quote(order.accepted_by_waiter.full_name)}"
         
         if order.is_delivery and order.courier and order.courier.is_on_shift:
-            # ОПОВІЩЕННЯ ПРИЗНАЧЕНОГО КУР'ЄРА
             target_employees.append(order.courier)
             ready_message += f"Призначений кур'єр: {html.quote(order.courier.full_name)}"
 
-        # Якщо ніхто не призначений/не на зміні, сповіщаємо операторів
         if not target_employees:
              operator_roles_res = await session.execute(select(Role.id).where(Role.can_manage_orders == True))
              operator_role_ids = operator_roles_res.scalars().all()
-             
              operators_on_shift_res = await session.execute(
                  select(Employee).where(
                      Employee.role_id.in_(operator_role_ids),
@@ -177,33 +186,29 @@ async def notify_all_parties_on_status_change(
              target_employees.extend(operators_on_shift_res.scalars().all())
              ready_message += f"Тип: {'Самовивіз' if order.order_type == 'pickup' else 'Доставка'}. Потрібна видача."
              
-        # Відправка сповіщень
         for employee in target_employees:
             if employee.telegram_user_id:
                 try:
                     await admin_bot.send_message(employee.telegram_user_id, ready_message)
                 except Exception as e:
-                    logger.error(f"Не вдалося сповістити співробітника {employee.telegram_user_id} про готовність: {e}")
+                    logger.error(f"Не вдалося сповістити {employee.telegram_user_id} про готовність: {e}")
 
-    # 3. Сповіщення призначеному КУР'ЄРУ (якщо статус змінив оператор/офіціант)
-    # Змінено: Додано перевірку на статус "Готовий до видачі", щоб не дублювати повідомлення
+    # 4. Сповіщення призначеному КУР'ЄРУ
     if order.courier and order.courier.telegram_user_id and "Кур'єр" not in actor_info and new_status.name != "Готовий до видачі":
-        courier_text = f"❗️ Статус вашого замовлення #{order.id} було змінено на: <b>{new_status.name}</b>"
-        try:
-            await admin_bot.send_message(order.courier.telegram_user_id, courier_text)
-        except Exception as e:
-            logger.error(f"Не вдалося сповістити кур'єра {order.courier.telegram_user_id}: {e}")
+        if new_status.visible_to_courier: # Тільки якщо статус видимий кур'єру
+            courier_text = f"❗️ Статус вашого замовлення #{order.id} змінено на: <b>{new_status.name}</b>"
+            try:
+                await admin_bot.send_message(order.courier.telegram_user_id, courier_text)
+            except Exception: pass
 
-    # 4. Сповіщення призначеному ОФІЦІАНТУ (якщо статус змінив оператор/кухня)
-    # Змінено: Додано перевірку на статус "Готовий до видачі", щоб не дублювати повідомлення
+    # 5. Сповіщення призначеному ОФІЦІАНТУ
     if order.order_type != 'delivery' and order.accepted_by_waiter and order.accepted_by_waiter.telegram_user_id and "Офіціант" not in actor_info and new_status.name != "Готовий до видачі":
         waiter_text = f"📢 Замовлення #{order.id} (Стіл: {html.quote(order.table.name if order.table else 'N/A')}) має новий статус: <b>{new_status.name}</b>"
         try:
             await admin_bot.send_message(order.accepted_by_waiter.telegram_user_id, waiter_text)
-        except Exception as e:
-            logger.error(f"Не вдалося сповістити офіціанта {order.accepted_by_waiter.telegram_user_id}: {e}")
+        except Exception: pass
 
-    # 5. Сповіщення КЛІЄНТУ (якщо потрібно)
+    # 6. Сповіщення КЛІЄНТУ
     if new_status.notify_customer and order.user_id and client_bot:
         client_text = f"Статус вашого замовлення #{order.id} змінено на: <b>{new_status.name}</b>"
         try:
