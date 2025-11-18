@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_
 from sqlalchemy.orm import joinedload
 
-# Добавлено Settings
+# Додано Settings
 from models import Order, OrderStatusHistory, Employee, Settings
 from templates import ADMIN_HTML_TEMPLATE, ADMIN_CLIENTS_LIST_BODY, ADMIN_CLIENT_DETAIL_BODY
 from dependencies import get_db_session, check_credentials
@@ -81,7 +81,15 @@ async def admin_clients_list(
         </td>
     </tr>""" for c in clients])
 
-    pagination = f"<div class='pagination'>{''.join([f'<a href=\"/admin/clients?page={i}{f'&search={q}' if q else ''}\" class=\"{'active' if i == page else ''}\">{i}</a>' for i in range(1, pages + 1)])}</div>"
+    # --- ВИПРАВЛЕННЯ Пагінації ---
+    links = []
+    for i in range(1, pages + 1):
+        search_part = f'&search={q}' if q else ''
+        class_part = 'active' if i == page else ''
+        links.append(f'<a href="/admin/clients?page={i}{search_part}" class="{class_part}">{i}</a>')
+    
+    pagination = f"<div class='pagination'>{' '.join(links)}</div>"
+    # --- КІНЕЦЬ ВИПРАВЛЕННЯ ---
 
     body = ADMIN_CLIENTS_LIST_BODY.format(
         search_query=q or '',
@@ -89,14 +97,13 @@ async def admin_clients_list(
         pagination=pagination if pages > 1 else ""
     )
     
-    # ВИПРАВЛЕНО: Додано "design_active"
     active_classes = {key: "" for key in ["main_active", "products_active", "categories_active", "orders_active", "statuses_active", "employees_active", "settings_active", "reports_active", "menu_active", "tables_active", "design_active"]}
     active_classes["clients_active"] = "active"
 
     return HTMLResponse(ADMIN_HTML_TEMPLATE.format(
         title="Клієнти", 
         body=body, 
-        site_title=settings.site_title or "Назва", # <-- NEW
+        site_title=settings.site_title or "Назва", # <-- Використання site_title
         **active_classes
     ))
 
@@ -108,7 +115,6 @@ async def admin_client_detail(
     username: str = Depends(check_credentials)
 ):
     """Відображає детальну інформацію про клієнта та його історію замовлень."""
-    # NEW: Отримуємо налаштування
     settings = await session.get(Settings, 1) or Settings()
     
     orders_res = await session.execute(
@@ -177,13 +183,12 @@ async def admin_client_detail(
         order_rows="".join(order_rows)
     )
 
-    # ВИПРАВЛЕНО: Додано "design_active"
     active_classes = {key: "" for key in ["main_active", "products_active", "categories_active", "orders_active", "statuses_active", "employees_active", "settings_active", "reports_active", "menu_active", "tables_active", "design_active"]}
     active_classes["clients_active"] = "active"
 
     return HTMLResponse(ADMIN_HTML_TEMPLATE.format(
         title=f"Клієнт: {html.escape(client_name)}", 
         body=body, 
-        site_title=settings.site_title or "Назва", # <-- NEW
+        site_title=settings.site_title or "Назва", # <-- Використання site_title
         **active_classes
     ))

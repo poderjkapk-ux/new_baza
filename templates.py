@@ -333,11 +333,6 @@ ADMIN_HTML_TEMPLATE = """
 </html>
 """
 
-# НОВИЙ ШАБЛОН ДЛЯ СТОРІНКИ "СТОЛИКИ"
-# templates.py
-
-# ... (код до ADMIN_TABLES_BODY) ...
-
 # ОНОВЛЕНИЙ ШАБЛОН ДЛЯ СТОРІНКИ "СТОЛИКИ"
 ADMIN_TABLES_BODY = """
 <style>
@@ -428,7 +423,7 @@ function closeModal() {{
     document.getElementById('assign-waiter-modal').classList.remove('active');
 }}
 
-// Закрытие модального окна по клику вне его
+// Закриття модального вікна по кліку поза ним
 window.onclick = function(event) {{
     const modal = document.getElementById('assign-waiter-modal');
     if (event.target == modal) {{
@@ -438,7 +433,6 @@ window.onclick = function(event) {{
 </script>
 """
 
-# ... (решта коду у файлі templates.py) ...
 # ВИПРАВЛЕНИЙ ШАБЛОН ДЛЯ ФОРМИ ЗАМОВЛЕННЯ
 ADMIN_ORDER_FORM_BODY = """
 <style>
@@ -774,7 +768,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Initial Call for new order page (if no data is injected)
     if (typeof window.initializeForm === 'function' && !window.initializeForm.invoked) {
-        // Перевіряємо, чи була вже викликана функція, щоб уникнути подвійної ініціалізації
+        // Перевіряємо, чи була вже викликана функція, щоб уникнути подвійної ініціалілізації
         const newOrderData = {
              items: {},
              action: '/api/admin/order/new',
@@ -809,6 +803,8 @@ WEB_ORDER_HTML = """
     <style>
       :root {{
         --primary-color: {primary_color_val};
+        --secondary-color: {secondary_color_val};
+        --background-color: {background_color_val};
         /* Автоматично генеруємо колір при наведенні (на 10% темніший) */
         --primary-hover-color: color-mix(in srgb, {primary_color_val}, black 10%);
         --primary-glow-color: {primary_color_val}26; /* 15% opacity */
@@ -824,13 +820,13 @@ WEB_ORDER_HTML = """
     <style>
         :root {{
             /* ЗМІНЕНО: Нейтральна світла тема */
-            --bg-color: #f4f4f4;
+            --bg-color: var(--background-color, #f4f4f4);
             --card-bg: #ffffff;
             --text-color: #333333;
             /* --primary-color: #5a5a5a; This will be overridden */
             /* --primary-hover-color: #404040; This will be overridden */
             /* --primary-glow-color: rgba(0, 0, 0, 0.1); This will be overridden */
-            --border-color: #dddddd;
+            --border-color: var(--secondary-color, #dddddd);
             --success-color: #28a745;
             --dark-text-for-accent: #ffffff;
             --side-padding: 20px;
@@ -853,9 +849,6 @@ WEB_ORDER_HTML = """
             margin: 0;
             background-color: var(--bg-color);
             color: var(--text-color);
-            /* ЗМІНЕНО: прибрано фоновий патерн
-            background-image: url('data:image/svg+xml,%3Csvg width="100" height="100" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"%3E%3Cpath d="M25 50 C25 25, 75 25, 75 50 C75 75, 25 75, 25 50 Z M50 25 C75 25, 75 75, 50 75 C25 75, 25 25, 50 25 Z" fill="none" stroke="%23E5D5BF" stroke-width="0.5" opacity="0.05"/%3E%3C/svg%3E');
-            */
         }}
         .container {{ 
             width: 100%; 
@@ -879,11 +872,6 @@ WEB_ORDER_HTML = """
             margin: 0;
             font-weight: 700;
             text-shadow: none; /* ЗМІНЕНО */
-            /* ЗМІНЕНО: прибрано градієнт
-            background: linear-gradient(145deg, #E5D5BF, #B1864B);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            */
         }}
         header p {{
             /* font-family: 'Golos Text', sans-serif; (Moved to dynamic style) */
@@ -1081,7 +1069,7 @@ WEB_ORDER_HTML = """
         .modal-content h2 {{ color: var(--primary-color); /* font-family: 'Playfair Display', serif; (Moved to dynamic style) */ margin-top: 0; text-align: center; }}
         .modal-content .form-group {{ margin-bottom: 15px; }}
         .modal-content .form-group label {{ display: block; margin-bottom: 8px; font-weight: 500; font-size: 0.9em; color: #555; }} /* ЗМІНЕНО */
-        .modal-content input[type="text"], .modal-content input[type="tel"] {{ width: 100%; padding: 12px; background: #eee; border: 1px solid var(--border-color); color: var(--text-color); border-radius: 5px; box-sizing: border-box; transition: border-color 0.3s ease, box-shadow 0.3s ease; }} /* ЗМІНЕНО */
+        .modal-content input[type="text"], .modal-content input[type="tel"] {{ width: 100%; padding: 12px; background: var(--secondary-color, #eee); border: 1px solid var(--border-color); color: var(--text-color); border-radius: 5px; box-sizing: border-box; transition: border-color 0.3s ease, box-shadow 0.3s ease; }} /* ЗМІНЕНО */
         .modal-content input[type="text"]:focus, .modal-content input[type="tel"]:focus {{ border-color: var(--primary-color); box-shadow: 0 0 10px var(--primary-glow-color); outline: none; }}
         .modal-content input:invalid {{ border-color: #e53935; }}
         .radio-group {{ display: flex; gap: 15px; }}
@@ -1181,7 +1169,8 @@ WEB_ORDER_HTML = """
         <div class="header-logo-container">
             {logo_html}
         </div>
-        <h1>{site_title}</h1> <p>ДЕМО ВЕРСІЯ</p> </header>
+        <h1>{site_title}</h1>
+    </header>
     <nav class="main-nav">
         {menu_links_html}
     </nav>
@@ -1252,7 +1241,7 @@ WEB_ORDER_HTML = """
         </div>
     </div>
 
-    <footer><p>&copy; 2024 Демо Версія. Всі права захищені.</p></footer> <script>
+    <footer><p>&copy; 2024 Всі права захищені.</p></footer> <script>
         document.addEventListener('DOMContentLoaded', () => {{
             let cart = {{}};
             const savedCart = localStorage.getItem('webCart');
@@ -1663,7 +1652,6 @@ ADMIN_EMPLOYEE_BODY = """
     </tbody></table>
 </div>
 """
-
 ADMIN_ROLES_BODY = """
 <div class="card">
     <ul class="nav-tabs">
@@ -1681,12 +1669,16 @@ ADMIN_ROLES_BODY = """
             <input type="checkbox" id="can_be_assigned" name="can_be_assigned" value="true">
             <label for="can_be_assigned">Може бути призначений на замовлення (Кур'єр)</label>
         </div>
+        <div class="checkbox-group">
+            <input type="checkbox" id="can_serve_tables" name="can_serve_tables" value="true">
+            <label for="can_serve_tables">Може обслуговувати столики (Офіціант)</label>
+        </div>
         <button type="submit">Додати роль</button>
     </form>
 </div>
 <div class="card">
     <h2>Список ролей</h2>
-    <table><thead><tr><th>ID</th><th>Назва</th><th>Керування замовленнями</th><th>Призначення на доставку</th><th>Дії</th></tr></thead><tbody>
+    <table><thead><tr><th>ID</th><th>Назва</th><th>Керув. замовл.</th><th>Признач. доставку</th><th>Обслуг. столики</th><th>Дії</th></tr></thead><tbody>
     {rows}
     </tbody></table>
 </div>
@@ -1718,8 +1710,8 @@ ADMIN_REPORTS_BODY = """
 </div>
 """
 
-# --- ИЗМЕНЕНИЕ 1: Шаблон ADMIN_SETTINGS_BODY обновлен ---
-# Удалены поля client_bot_token, admin_bot_token и admin_chat_id
+# --- Шаблон ADMIN_SETTINGS_BODY оновлено ---
+# Видалено поля client_bot_token, admin_bot_token, admin_chat_id та налаштування R-Keeper
 ADMIN_SETTINGS_BODY = """
 <div class="card">
     <form action="/admin/settings" method="post" enctype="multipart/form-data">
@@ -1729,14 +1721,6 @@ ADMIN_SETTINGS_BODY = """
         <label>Логотип (завантажте новий, щоб замінити):</label>
         <input type="file" name="logo_file" accept="image/*">
         {current_logo_html}
-
-        <h3>Інтеграція з R-Keeper</h3>
-        <div class="checkbox-group"><input type="checkbox" name="r_keeper_enabled" id="r_keeper_enabled" {r_keeper_enabled_checked}><label for="r_keeper_enabled">Увімкнути інтеграцію</label></div>
-        <label>API URL:</label><input type="text" name="r_keeper_api_url" value="{r_keeper_api_url}">
-        <label>Користувач:</label><input type="text" name="r_keeper_user" value="{r_keeper_user}">
-        <label>Пароль:</label><input type="password" name="r_keeper_password" value="{r_keeper_password}">
-        <label>Код станції:</label><input type="text" name="r_keeper_station_code" value="{r_keeper_station_code}">
-        <label>Тип оплати:</label><input type="text" name="r_keeper_payment_type" value="{r_keeper_payment_type}">
 
         <h3 style="margin-top: 2rem;">Налаштування Favicon</h3>
         <p>Завантажте необхідні файли favicon. Після завантаження оновіть сторінку (Ctrl+F5), щоб побачити зміни.</p>
@@ -1753,7 +1737,7 @@ ADMIN_SETTINGS_BODY = """
             <div class="form-group"><label for="favicon_32x32">favicon-32x32.png</label><input type="file" id="favicon_32x32" name="favicon_32x32" accept="image/png"></div>
             <div class="form-group"><label for="favicon_16x16">favicon-16x16.png</label><input type="file" id="favicon_16x16" name="favicon_16x16" accept="image/png"></div>
             <div class="form-group"><label for="favicon_ico">favicon.ico (всі розміри)</label><input type="file" id="favicon_ico" name="favicon_ico" accept="image/x-icon"></div>
-            <div class="form-group"><label for="site_webmanifest">site.webmanifest</label><input type="file" id="site_webmanifest" name=".webmanifest"></div>
+            <div class="form-group"><label for="site_webmanifest">site.webmanifest</label><input type="file" id="site_webmanifest" name="site_webmanifest" accept="application/manifest+json"></div>
         </div>
         
         <div style="margin-top: 2rem;">
@@ -1762,7 +1746,7 @@ ADMIN_SETTINGS_BODY = """
     </form>
 </div>
 """
-# --- КОНЕЦ ИЗМЕНЕНИЯ 1 ---
+# --- КІНЕЦЬ ОНОВЛЕННЯ ADMIN_SETTINGS_BODY ---
 
 
 # Template for the Menu Item management page in the admin panel
@@ -1916,7 +1900,7 @@ ADMIN_ORDER_MANAGE_BODY = """
 """
 
 
-# НОВІ ШАБЛОНИ ДЛЯ РОЗДІЛУ "КЛІЄНТИ"
+# ШАБЛОНИ ДЛЯ РОЗДІЛУ "КЛІЄНТИ"
 
 ADMIN_CLIENTS_LIST_BODY = """
 <div class="card">
@@ -2063,15 +2047,6 @@ ADMIN_CLIENT_DETAIL_BODY = """
 </script>
 """
 
-# templates.py
-
-# ... (весь ваш існуючий код до цього моменту) ...
-
-# ОНОВЛЕНИЙ ШАБЛОН ДЛЯ МЕНЮ В РЕСТОРАНІ (ПО QR-КОДУ)
-# templates.py
-
-# ... (весь ваш існуючий код до IN_HOUSE_MENU_HTML_TEMPLATE) ...
-
 # ОНОВЛЕНИЙ ШАБЛОН ДЛЯ МЕНЮ В РЕСТОРАНІ (ПО QR-КОДУ)
 IN_HOUSE_MENU_HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -2095,6 +2070,8 @@ IN_HOUSE_MENU_HTML_TEMPLATE = """
     <style>
       :root {{
         --primary-color: {primary_color_val};
+        --secondary-color: {secondary_color_val};
+        --background-color: {background_color_val};
         --primary-hover-color: color-mix(in srgb, {primary_color_val}, black 10%);
         --primary-glow-color: {primary_color_val}26; /* 15% opacity */
       }}
@@ -2109,13 +2086,13 @@ IN_HOUSE_MENU_HTML_TEMPLATE = """
     <style>
         :root {{
             /* ЗМІНЕНО: Нейтральна світла тема */
-            --bg-color: #f4f4f4;
+            --bg-color: var(--background-color, #f4f4f4);
             --card-bg: #ffffff;
             --text-color: #333333;
             /* --primary-color: #5a5a5a; (Overridden) */
             /* --primary-hover-color: #404040; (Overridden) */
             /* --primary-glow-color: rgba(0, 0, 0, 0.1); (Overridden) */
-            --border-color: #dddddd;
+            --border-color: var(--secondary-color, #dddddd);
             --dark-text-for-accent: #ffffff;
             --side-padding: 20px;
         }}
@@ -2129,9 +2106,6 @@ IN_HOUSE_MENU_HTML_TEMPLATE = """
             margin: 0;
             background-color: var(--bg-color);
             color: var(--text-color);
-            /* ЗМІНЕНО: прибрано фоновий патерн
-            background-image: url('data:image/svg+xml,%3Csvg width="100" height="100" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"%3E%3Cpath d="M25 50 C25 25, 75 25, 75 50 C75 75, 25 75, 25 50 Z M50 25 C75 25, 75 75, 50 75 C25 75, 25 25, 50 25 Z" fill="none" stroke="%23E5D5BF" stroke-width="0.5" opacity="0.05"/%3E%3C/svg%3E');
-            */
         }}
         .container {{ width: 100%; margin: 0 auto; padding: 0; }}
         header {{ text-align: center; padding: 40px var(--side-padding) 20px; }}
@@ -2141,10 +2115,6 @@ IN_HOUSE_MENU_HTML_TEMPLATE = """
             /* font-family: 'Playfair Display', serif; (Moved) */
             font-size: clamp(2.5em, 5vw, 3.5em);
             color: var(--text-color); margin: 0; font-weight: 700;
-            /* ЗМІНЕНО: прибрано градієнт
-            background: linear-gradient(145deg, #E5D5BF, #B1864B);
-            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-            */
         }}
         header p {{
             /* font-family: 'Golos Text', sans-serif; (Moved) */
@@ -2243,7 +2213,7 @@ IN_HOUSE_MENU_HTML_TEMPLATE = """
         .cart-item-info {{ flex-grow: 1; }} .cart-item-name {{ font-weight: 600; }}
         .cart-item-price {{ color: #555; font-size: 0.9em; }}
         .cart-item-controls {{ display: flex; align-items: center; }}
-        .cart-item-controls button {{ background: #eee; border: 1px solid var(--border-color); color: var(--text-color); width: 28px; height: 28px; cursor: pointer; border-radius: 50%; }}
+        .cart-item-controls button {{ background: var(--secondary-color, #eee); border: 1px solid var(--border-color); color: var(--text-color); width: 28px; height: 28px; cursor: pointer; border-radius: 50%; }}
         .cart-item-controls span {{ margin: 0 10px; }}
         .cart-footer {{ padding: 20px; border-top: 1px solid var(--border-color); background-color: rgba(255, 255, 255, 0.8); }}
         .cart-total {{ display: flex; justify-content: space-between; font-size: 1.2em; font-weight: 700; margin-bottom: 20px; }}
@@ -2259,7 +2229,7 @@ IN_HOUSE_MENU_HTML_TEMPLATE = """
         #place-order-btn:hover:not(:disabled) {{ background-color: var(--primary-hover-color); box-shadow: 0 0 15px var(--primary-glow-color); }}
         #place-order-btn:disabled {{ background-color: #aaa; color: #eee; cursor: not-allowed; border-color: #aaa; }}
         .call-waiter-btn, .request-bill-btn {{ background-color: transparent; color: var(--primary-color); }}
-        .call-waiter-btn:hover, .request-bill-btn:hover {{ background-color: rgba(0, 0, 0, 0.05); }}
+        .call-waiter-btn:hover, .request-bill-btn:hover {{ background-color: var(--secondary-color, #f4f4f4); }}
 
         #cart-toggle {{
             position: fixed; bottom: 20px; right: 20px; background-color: var(--primary-color);
@@ -2303,7 +2273,7 @@ IN_HOUSE_MENU_HTML_TEMPLATE = """
         <div class="header-logo-container">
             {logo_html}
         </div>
-        <h1>{site_title}</h1> <p>ДЕМО ВЕРСІЯ</p> <h2 class="table-name-header">{table_name}</h2>
+        <h1>{site_title}</h1> <h2 class="table-name-header">{table_name}</h2>
     </header>
     <div class="container">
         <nav id="category-nav" class="category-nav"></nav>
@@ -2348,7 +2318,7 @@ IN_HOUSE_MENU_HTML_TEMPLATE = """
         </div>
     </aside>
     <div id="toast" class="toast"></div>
-    <footer><p>&copy; 2024 Демо Версія. Всі права захищені.</p></footer> <script>
+    <footer><p>&copy; 2024 Всі права захищені.</p></footer> <script>
         document.addEventListener('DOMContentLoaded', () => {{
             const TABLE_ID = {table_id};
             let cart = {{}};
@@ -2566,6 +2536,7 @@ IN_HOUSE_MENU_HTML_TEMPLATE = """
 """
 
 # --- NEW: TEMPLATE FOR DESIGN & SEO SETTINGS ---
+# Додано нові поля для кольорів та розширено список шрифтів
 ADMIN_DESIGN_SETTINGS_BODY = """
 <div class="card">
     <form action="/admin/design_settings" method="post">
@@ -2585,18 +2556,31 @@ ADMIN_DESIGN_SETTINGS_BODY = """
         <label for="primary_color">Основний колір (Акцент):</label>
         <input type="color" id="primary_color" name="primary_color" value="{primary_color}">
         
+        <label for="secondary_color">Додатковий колір (Наприклад, для рамок):</label>
+        <input type="color" id="secondary_color" name="secondary_color" value="{secondary_color}">
+
+        <label for="background_color">Колір фону:</label>
+        <input type="color" id="background_color" name="background_color" value="{background_color}">
+        
         <label for="font_family_sans">Основний шрифт (Без засічок):</label>
         <select id="font_family_sans" name="font_family_sans">
-            <option value="Golos Text" {font_select_sans_golos}>Golos Text (За замовчуванням)</option>
-            <option value="Inter" {font_select_sans_inter}>Inter</option>
-            <option value="Roboto" {font_select_sans_roboto}>Roboto</option>
+            <option value="Golos Text" {font_select_sans_Golos_Text}>Golos Text (За замовчуванням)</option>
+            <option value="Inter" {font_select_sans_Inter}>Inter</option>
+            <option value="Roboto" {font_select_sans_Roboto}>Roboto</option>
+            <option value="Open Sans" {font_select_sans_Open_Sans}>Open Sans</option>
+            <option value="Montserrat" {font_select_sans_Montserrat}>Montserrat</option>
+            <option value="Lato" {font_select_sans_Lato}>Lato</option>
+            <option value="Nunito" {font_select_sans_Nunito}>Nunito</option>
         </select>
         
         <label for="font_family_serif">Шрифт заголовків (Із засічками):</label>
         <select id="font_family_serif" name="font_family_serif">
-            <option value="Playfair Display" {font_select_serif_playfair}>Playfair Display (За замовчуванням)</option>
-            <option value="Lora" {font_select_serif_lora}>Lora</option>
-            <option value="Merriweather" {font_select_serif_merriweather}>Merriweather</option>
+            <option value="Playfair Display" {font_select_serif_Playfair_Display}>Playfair Display (За замовчуванням)</option>
+            <option value="Lora" {font_select_serif_Lora}>Lora</option>
+            <option value="Merriweather" {font_select_serif_Merriweather}>Merriweather</option>
+            <option value="EB Garamond" {font_select_serif_EB_Garamond}>EB Garamond</option>
+            <option value="PT Serif" {font_select_serif_PT_Serif}>PT Serif</option>
+            <option value="Cormorant" {font_select_serif_Cormorant}>Cormorant</option>
         </select>
         
         <h2 style="margin-top: 2rem;"><i class="fa-brands fa-telegram"></i> Тексти Telegram-бота</h2>

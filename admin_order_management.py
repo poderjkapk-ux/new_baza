@@ -2,7 +2,7 @@
 
 import html
 import logging
-import os  # <-- --- ИЗМЕНЕНИЕ 1: Добавлен импорт 'os' ---
+import os  # <-- Імпорт 'os'
 from fastapi import APIRouter, Depends, Form, HTTPException
 from fastapi.responses import RedirectResponse, HTMLResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,12 +23,11 @@ from notification_manager import notify_all_parties_on_status_change
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# --- ИЗМЕНЕНИЕ 2: Функция get_bot_instances обновлена ---
+# --- Функція get_bot_instances оновлена ---
 async def get_bot_instances(session: AsyncSession) -> tuple[Bot | None, Bot | None]:
     """Допоміжна функція для отримання екземплярів ботів на основі змінних оточення."""
-    # settings = await session.get(Settings, 1) # <-- УДАЛЕНО
     
-    # Читаем токены напрямую из os.environ
+    # Читаємо токени напряму з os.environ
     admin_bot_token = os.environ.get('ADMIN_BOT_TOKEN')
     client_bot_token = os.environ.get('CLIENT_BOT_TOKEN')
 
@@ -42,7 +41,7 @@ async def get_bot_instances(session: AsyncSession) -> tuple[Bot | None, Bot | No
     admin_bot = Bot(token=admin_bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     client_bot = Bot(token=client_bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     return admin_bot, client_bot
-# --- КОНЕЦ ИЗМЕНЕНИЯ 2 ---
+# --- КІНЕЦЬ get_bot_instances ---
 
 @router.get("/admin/order/manage/{order_id}", response_class=HTMLResponse)
 async def get_manage_order_page(
@@ -51,7 +50,6 @@ async def get_manage_order_page(
     username: str = Depends(check_credentials)
 ):
     """Відображає сторінку керування для конкретного замовлення."""
-    # NEW: Отримуємо налаштування
     settings = await session.get(Settings, 1) or Settings()
     
     order = await session.get(
@@ -106,13 +104,12 @@ async def get_manage_order_page(
         history_html=history_html or "<p>Історія статусів порожня.</p>"
     )
 
-    # NEW: Додано "design_active"
     active_classes = {key: "" for key in ["clients_active", "main_active", "products_active", "categories_active", "statuses_active", "settings_active", "employees_active", "reports_active", "menu_active", "tables_active", "design_active"]}
     active_classes["orders_active"] = "active"
     return HTMLResponse(ADMIN_HTML_TEMPLATE.format(
         title=f"Керування замовленням #{order.id}", 
         body=body, 
-        site_title=settings.site_title or "Назва", # <-- NEW
+        site_title=settings.site_title or "Назва",
         **active_classes
     ))
 
@@ -175,9 +172,7 @@ async def web_assign_courier(
     if not admin_bot:
          raise HTTPException(status_code=500, detail="Бот не налаштований для відправки сповіщень.")
          
-    # --- ИЗМЕНЕНИЕ 3: Получаем ADMIN_CHAT_ID из os.environ ---
     admin_chat_id_str = os.environ.get('ADMIN_CHAT_ID')
-    # --- КОНЕЦ ИЗМЕНЕНИЯ 3 ---
 
     try:
         old_courier_id = order.courier_id
@@ -210,15 +205,11 @@ async def web_assign_courier(
                     
                     if order.is_delivery and order.address:
                         encoded_address = quote_plus(order.address)
-                        # ВИПРАВЛЕНО: Правильне посилання на карту
                         map_url = f"http://googleusercontent.com/maps/google.com/0{encoded_address}"
                         kb_courier.row(InlineKeyboardButton(text="🗺️ На карті", url=map_url))
                         
-                    # ВИДАЛЕНО: Кнопка "Зателефонувати клієнту" за запитом користувача.
-                    
                     await admin_bot.send_message(
                         new_courier.telegram_user_id,
-                        # ОНОВЛЕНО: Додано номер телефону в текст повідомлення
                         f"🔔 Вам призначено нове замовлення!\n\n<b>Замовлення #{order.id}</b>\nАдреса: {html.escape(order.address or 'Самовивіз')}\nТелефон: {html.escape(order.phone_number)}\nСума: {order.total_price} грн.",
                         reply_markup=kb_courier.as_markup()
                     )
@@ -227,10 +218,8 @@ async def web_assign_courier(
         
         await session.commit()
 
-        # --- ИЗМЕНЕНИЕ 4: Используем admin_chat_id_str ---
         if admin_chat_id_str:
             await admin_bot.send_message(admin_chat_id_str, f"👤 Замовленню #{order.id} призначено кур'єра: <b>{html.escape(new_courier_name)}</b> (через веб-панель)")
-        # --- КОНЕЦ ИЗМЕНЕНИЯ 4 ---
             
     finally:
         await admin_bot.session.close()

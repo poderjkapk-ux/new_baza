@@ -161,16 +161,14 @@ async def assign_waiter_to_table(
     return RedirectResponse(url="/admin/tables", status_code=303)
 
 
-# --- ПОЧАТОК ЗМІНИ: Ендпоінт тепер приймає access_token ---
+# --- Ендпоінт тепер приймає access_token ---
 @router.get("/qr/{access_token}")
 async def get_qr_code(request: Request, access_token: str):
-# --- КІНЕЦЬ ЗМІНИ ---
     """Генерує та повертає QR-код для столика."""
     base_url = str(request.base_url)
 
-    # --- ПОЧАТОК ЗМІНИ: URL тепер використовує access_token ---
+    # --- URL тепер використовує access_token ---
     url = f"{base_url}menu/table/{access_token}"
-    # --- КІНЕЦЬ ЗМІНИ ---
 
     img = qrcode.make(url)
     buf = io.BytesIO()

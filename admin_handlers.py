@@ -13,7 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import joinedload
 from urllib.parse import quote_plus
-import re # <--- ДОДАНО
+import re
+import os # <--- ДОБАВЛЕНО: для доступа к os.environ
 
 from models import Order, Product, Category, OrderStatus, Employee, Role, Settings, OrderStatusHistory
 # --- ПОЧАТОК ЗМІН: Додано _generate_waiter_order_view ---
@@ -240,22 +241,34 @@ def register_admin_handlers(dp: Dispatcher):
         await callback.answer(f"Статус замовлення #{order.id} змінено.")
 
     @dp.callback_query(F.data.startswith("edit_order_"))
-    async def show_edit_order_menu(callback: CallbackQuery):
+    async def show_edit_order_menu(callback: CallbackQuery, session: AsyncSession):
         order_id = int(callback.data.split("_")[2])
+        # ВИПРАВЛЕННЯ NameError: завантажуємо order для відображення order.id
+        order = await session.get(Order, order_id, options=[joinedload(Order.status)])
+        if not order: 
+             return await callback.answer("Замовлення не знайдено!", show_alert=True)
+        
+        # ПЕРЕВІРКА: чи статус є фінальним (виконано або скасовано)
+        if order.status.is_completed_status or order.status.is_cancelled_status:
+            return await callback.answer(
+                "Неможливо редагувати замовлення, яке вже виконано або скасовано.", 
+                show_alert=True
+            )
+        
         kb = InlineKeyboardBuilder()
         kb.row(InlineKeyboardButton(text="👤 Клієнт", callback_data=f"edit_customer_{order_id}"),
                InlineKeyboardButton(text="🍔 Склад замовлення", callback_data=f"edit_items_{order_id}"))
         kb.row(InlineKeyboardButton(text="🚚 Доставка", callback_data=f"edit_delivery_{order_id}"))
         kb.row(InlineKeyboardButton(text="⬅️ Повернутися до замовлення", callback_data=f"view_order_{order_id}"))
-        await callback.message.edit_text(f"📝 <b>Редагування замовлення #{order_id}</b>\nВиберіть, що хочете змінити:", reply_markup=kb.as_markup())
+        
+        # ВИКОРИСТАННЯ order.id, оскільки об'єкт order тепер завантажено
+        await callback.message.edit_text(f"📝 <b>Редагування замовлення #{order.id}</b>\nВиберіть, що хочете змінити:", reply_markup=kb.as_markup())
         await callback.answer()
 
-    # --- ПОЧАТОК ЗМІН: Оновлений обробник back_to_order_view ---
     @dp.callback_query(F.data.startswith("view_order_"))
     async def back_to_order_view(callback: CallbackQuery, session: AsyncSession):
         order_id = int(callback.data.split("_")[2])
         
-        # Завантажуємо замовлення, щоб перевірити його тип
         order = await session.get(Order, order_id, options=[joinedload(Order.table)])
         if not order:
             return await callback.answer("Помилка: Замовлення не знайдено.", show_alert=True)
@@ -267,7 +280,6 @@ def register_admin_handlers(dp: Dispatcher):
                 await callback.message.edit_text(text, reply_markup=keyboard)
             except TelegramBadRequest as e:
                 logger.warning(f"Error in back_to_order_view (waiter): {e}. Sending new message.")
-                # Якщо повідомлення не можна відредагувати (наприклад, воно без тексту), видаляємо старе і надсилаємо нове
                 try:
                     await callback.message.delete()
                     await callback.message.answer(text, reply_markup=keyboard)
@@ -278,7 +290,6 @@ def register_admin_handlers(dp: Dispatcher):
             # Це замовлення на доставку/самовивіз, викликаємо звичайне адмін-представлення
             await _display_order_view(callback.bot, callback.message.chat.id, callback.message.message_id, order_id, session)
             await callback.answer()
-    # --- КІНЕЦЬ ЗМІН ---
 
     @dp.callback_query(F.data.startswith("edit_customer_"))
     async def edit_customer_menu_handler(callback: CallbackQuery, session: AsyncSession):
@@ -440,10 +451,20 @@ def register_admin_handlers(dp: Dispatcher):
 
     @dp.callback_query(F.data.startswith("assign_courier_"))
     async def assign_courier(callback: CallbackQuery, session: AsyncSession):
-        settings = await session.get(Settings, 1)
+        import os
+        admin_chat_id_str = os.environ.get('ADMIN_CHAT_ID')
+
         order_id, courier_id = map(int, callback.data.split("_")[2:])
-        order = await session.get(Order, order_id)
+        # Завантажуємо order зі статусом для перевірки
+        order = await session.get(Order, order_id, options=[joinedload(Order.status)])
         if not order: return await callback.answer("Замовлення не знайдено!", show_alert=True)
+        
+        # ПЕРЕВІРКА: чи статус є фінальним (виконано або скасовано)
+        if order.status.is_completed_status or order.status.is_cancelled_status:
+             return await callback.answer(
+                "Неможливо призначити кур'єра на замовлення, яке вже виконано або скасовано.", 
+                show_alert=True
+            )
 
         old_courier_id = order.courier_id
         new_courier_name = "Не призначений"
@@ -473,15 +494,11 @@ def register_admin_handlers(dp: Dispatcher):
                     
                     if order.is_delivery and order.address:
                         encoded_address = quote_plus(order.address)
-                        # ВИПРАВЛЕНО: Правильне посилання на карту
-                        map_query = f"https://maps.google.com/?q={encoded_address}"
+                        map_query = f"http://googleusercontent.com/maps/google.com/0{encoded_address}"
                         kb_courier.row(InlineKeyboardButton(text="🗺️ На карті", url=map_query))
                     
-                    # ВИДАЛЕНО: Кнопка "Зателефонувати клієнту" за запитом користувача.
-                        
                     await callback.bot.send_message(
                         new_courier.telegram_user_id,
-                        # ОНОВЛЕНО: Додано номер телефону в текст повідомлення
                         f"🔔 Вам призначено нове замовлення!\n\n<b>Замовлення #{order.id}</b>\nАдреса: {html_module.escape(order.address or 'Самовивіз')}\nТелефон: {html_module.escape(order.phone_number)}\nСума: {order.total_price} грн.",
                         reply_markup=kb_courier.as_markup()
                     )
@@ -490,8 +507,8 @@ def register_admin_handlers(dp: Dispatcher):
         
         await session.commit()
         
-        if settings and settings.admin_chat_id:
-            await callback.bot.send_message(settings.admin_chat_id, f"👤 Замовленню #{order.id} призначено кур'єра: <b>{html_module.escape(new_courier_name)}</b>")
+        if admin_chat_id_str:
+            await callback.bot.send_message(admin_chat_id_str, f"👤 Замовленню #{order.id} призначено кур'єра: <b>{html_module.escape(new_courier_name)}</b>")
         
         await _display_order_view(callback.bot, callback.message.chat.id, callback.message.message_id, order_id, session)
         await callback.answer(f"Кур'єра призначено: {new_courier_name}")
