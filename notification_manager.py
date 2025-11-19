@@ -30,6 +30,7 @@ def _parse_products_str(products_str: str) -> dict:
 async def notify_new_order_to_staff(admin_bot: Bot, order: Order, session: AsyncSession):
     """
     Надсилає сповіщення про НОВЕ замовлення в загальний чат, операторам, поварам та барменам.
+    Використовується для веб-доставки та замовлень, створених офіціантом.
     """
     admin_chat_id_str = os.environ.get('ADMIN_CHAT_ID')
     
@@ -94,14 +95,17 @@ async def notify_new_order_to_staff(admin_bot: Bot, order: Order, session: Async
             logger.error(f"Не вдалося відправити нове замовлення оператору/адміну {chat_id}: {e}")
 
     # 2. РОЗПОДІЛ НА ВИРОБНИЦТВО (Кухня/Бар)
-    # Використовуємо прапорець requires_kitchen_notify як загальний тригер "На виробництво"
+    # Перевіряємо налаштування статусу перед відправкою
     if order.status and order.status.requires_kitchen_notify:
         await distribute_order_to_production(admin_bot, order, session)
+    else:
+        logger.info(f"Замовлення #{order.id} НЕ відправлено на виробництво (налаштування статусу '{order.status.name}').")
 
 
 async def distribute_order_to_production(bot: Bot, order: Order, session: AsyncSession):
     """
     Розподіляє товари замовлення між Кухнею та Баром і надсилає відповідним працівникам.
+    Викликається з place_in_house_order та notify_new_order_to_staff.
     """
     # 1. Парсимо товари
     products_map = _parse_products_str(order.products)
@@ -116,10 +120,13 @@ async def distribute_order_to_production(bot: Bot, order: Order, session: AsyncS
     kitchen_items = []
     bar_items = []
 
-    for product in db_products:
-        qty = products_map.get(product.name)
-        if qty:
-            item_str = f"- {html.quote(product.name)} x {qty}"
+    # Словник для швидкого пошуку продукту
+    products_by_name = {p.name: p for p in db_products}
+
+    for name, qty in products_map.items():
+        product = products_by_name.get(name)
+        if product:
+            item_str = f"- {html.quote(name)} x {qty}"
             if product.preparation_area == 'bar':
                 bar_items.append(item_str)
             else:
@@ -174,7 +181,15 @@ async def send_group_notification(bot: Bot, order: Order, items: list, role_filt
         is_delivery = order.is_delivery
         items_formatted = "\n".join(items)
         
-        text = (f"{title}: <b>#{order.id}</b>\n"
+        table_info = ""
+        if order.order_type == 'in_house' and order.table_id:
+            # Завантажуємо назву столика, якщо вона ще не завантажена
+            if 'table' not in order.__dict__:
+                await session.refresh(order, ['table'])
+            if order.table:
+                table_info = f" (Стіл: {html.quote(order.table.name)})"
+        
+        text = (f"{title}: <b>#{order.id}</b>{table_info}\n"
                 f"<b>Тип:</b> {'Доставка' if is_delivery else 'В закладі / Самовивіз'}\n"
                 f"<b>Час:</b> {html.quote(order.delivery_time)}\n\n"
                 f"<b>СКЛАД:</b>\n{items_formatted}\n\n"
@@ -220,6 +235,7 @@ async def notify_all_parties_on_status_change(
             logger.error(f"Не вдалося відправити лог в адмін-чат: {e}")
 
     # 2. ЛОГІКА ДЛЯ ВИРОБНИЦТВА (Кухня/Бар)
+    # Перевіряємо, чи вимагає новий статус відправки на кухню
     if new_status.requires_kitchen_notify:
         # Відправляємо розподілене замовлення
         await distribute_order_to_production(admin_bot, order, session)
@@ -229,14 +245,17 @@ async def notify_all_parties_on_status_change(
         ready_message = f"📢 <b>ЗАМОВЛЕННЯ ГОТОВЕ ДО ВИДАЧІ: #{order.id}</b>! \n"
         
         target_employees = []
+        # Якщо є офіціант (для замовлення в закладі)
         if order.order_type == 'in_house' and order.accepted_by_waiter and order.accepted_by_waiter.is_on_shift:
             target_employees.append(order.accepted_by_waiter)
             ready_message += f"Стіл: {html.quote(order.table.name if order.table else 'N/A')}. Прийняв: {html.quote(order.accepted_by_waiter.full_name)}"
         
+        # Якщо є кур'єр (для доставки)
         if order.is_delivery and order.courier and order.courier.is_on_shift:
             target_employees.append(order.courier)
             ready_message += f"Призначений кур'єр: {html.quote(order.courier.full_name)}"
 
+        # Якщо нікого немає, сповіщаємо операторів
         if not target_employees:
              operator_roles_res = await session.execute(select(Role.id).where(Role.can_manage_orders == True))
              operator_role_ids = operator_roles_res.scalars().all()
@@ -257,7 +276,7 @@ async def notify_all_parties_on_status_change(
                 except Exception as e:
                     logger.error(f"Не вдалося сповістити {employee.telegram_user_id} про готовність: {e}")
 
-    # 4. Сповіщення призначеному КУР'ЄРУ
+    # 4. Сповіщення призначеному КУР'ЄРУ (про інші зміни статусу)
     if order.courier and order.courier.telegram_user_id and "Кур'єр" not in actor_info and new_status.name != "Готовий до видачі":
         if new_status.visible_to_courier: # Тільки якщо статус видимий кур'єру
             courier_text = f"❗️ Статус вашого замовлення #{order.id} змінено на: <b>{new_status.name}</b>"
@@ -265,7 +284,7 @@ async def notify_all_parties_on_status_change(
                 await admin_bot.send_message(order.courier.telegram_user_id, courier_text)
             except Exception: pass
 
-    # 5. Сповіщення призначеному ОФІЦІАНТУ
+    # 5. Сповіщення призначеному ОФІЦІАНТУ (про інші зміни статусу)
     if order.order_type != 'delivery' and order.accepted_by_waiter and order.accepted_by_waiter.telegram_user_id and "Офіціант" not in actor_info and new_status.name != "Готовий до видачі":
         waiter_text = f"📢 Замовлення #{order.id} (Стіл: {html.quote(order.table.name if order.table else 'N/A')}) має новий статус: <b>{new_status.name}</b>"
         try:

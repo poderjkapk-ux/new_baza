@@ -7,13 +7,13 @@ import os
 from fastapi import APIRouter, Depends, HTTPException, Request, Body
 from fastapi.responses import HTMLResponse, JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from sqlalchemy.orm import joinedload, selectinload
 from aiogram import Bot, html as aiogram_html
 from aiogram.utils.keyboard import InlineKeyboardBuilder, InlineKeyboardButton
 from urllib.parse import quote_plus as url_quote_plus
 
-from models import Table, Product, Category, Order, Settings, Employee, OrderStatusHistory
+from models import Table, Product, Category, Order, Settings, Employee, OrderStatusHistory, OrderStatus
 from dependencies import get_db_session
 from templates import IN_HOUSE_MENU_HTML_TEMPLATE
 # --- НОВИЙ ІМПОРТ: Для розподілу на кухню/бар ---
@@ -35,7 +35,7 @@ async def get_admin_bot(session: AsyncSession) -> Bot | None:
 
 @router.get("/menu/table/{access_token}", response_class=HTMLResponse)
 async def get_in_house_menu(access_token: str, request: Request, session: AsyncSession = Depends(get_db_session)):
-    """Відображає сторінку меню для конкретного столика."""
+    """Відображає сторінку меню для конкретного столика з історією замовлень."""
 
     table_res = await session.execute(
         select(Table).where(Table.access_token == access_token)
@@ -63,8 +63,38 @@ async def get_in_house_menu(access_token: str, request: Request, session: AsyncS
     categories = [{"id": c.id, "name": c.name} for c in categories_res.scalars().all()]
     products = [{"id": p.id, "name": p.name, "description": p.description, "price": p.price, "image_url": p.image_url, "category_id": p.category_id} for p in products_res.scalars().all()]
 
-    # Передаємо дані меню в шаблон через JSON
+    # --- НОВЕ: Отримуємо історію неоплачених замовлень для цього столика ---
+    # Вважаємо "неоплаченими" всі, де статус не є фінальним (успіх або відміна)
+    final_statuses_res = await session.execute(
+        select(OrderStatus.id).where(or_(OrderStatus.is_completed_status == True, OrderStatus.is_cancelled_status == True))
+    )
+    final_status_ids = final_statuses_res.scalars().all()
+
+    active_orders_res = await session.execute(
+        select(Order)
+        .where(Order.table_id == table.id, Order.status_id.not_in(final_status_ids))
+        .options(joinedload(Order.status))
+        .order_by(Order.id.desc())
+    )
+    active_orders = active_orders_res.scalars().all()
+
+    history_list = []
+    grand_total = 0
+
+    for o in active_orders:
+        grand_total += o.total_price
+        status_name = o.status.name if o.status else "Обробяється"
+        history_list.append({
+            "id": o.id,
+            "products": o.products,
+            "total_price": o.total_price,
+            "status": status_name,
+            "time": o.created_at.strftime('%H:%M')
+        })
+
+    # Передаємо дані меню та історії в шаблон через JSON
     menu_data = json.dumps({"categories": categories, "products": products})
+    history_data = json.dumps(history_list) # Передаємо історію як JSON
 
     # --- Design variables ---
     site_title = settings.site_title or "Назва"
@@ -80,6 +110,8 @@ async def get_in_house_menu(access_token: str, request: Request, session: AsyncS
         table_id=table.id,
         logo_html=logo_html,
         menu_data=menu_data,
+        history_data=history_data,   # <-- НОВЕ: Передаємо JSON історії
+        grand_total=grand_total,     # <-- НОВЕ: Загальна сума
         site_title=html_module.escape(site_title),
         seo_description=html_module.escape(settings.seo_description or ""),
         seo_keywords=html_module.escape(settings.seo_keywords or ""),
@@ -140,8 +172,21 @@ async def request_bill(table_id: int, session: AsyncSession = Depends(get_db_ses
     table = await session.get(Table, table_id, options=[selectinload(Table.assigned_waiters)])
     if not table: raise HTTPException(status_code=404, detail="Столик не знайдено.")
 
+    # Рахуємо загальну суму активних замовлень для повідомлення офіціанту
+    final_statuses_res = await session.execute(
+        select(OrderStatus.id).where(or_(OrderStatus.is_completed_status == True, OrderStatus.is_cancelled_status == True))
+    )
+    final_status_ids = final_statuses_res.scalars().all()
+
+    active_orders_res = await session.execute(
+        select(Order).where(Order.table_id == table.id, Order.status_id.not_in(final_status_ids))
+    )
+    active_orders = active_orders_res.scalars().all()
+    total_bill = sum(o.total_price for o in active_orders)
+
     waiters = table.assigned_waiters
-    message_text = f"💰 <b>Запит на розрахунок зі столика: {html_module.escape(table.name)}</b>"
+    message_text = (f"💰 <b>Запит на розрахунок зі столика: {html_module.escape(table.name)}</b>\n"
+                    f"Загальна сума (поточна): <b>{total_bill} грн</b>")
 
     admin_chat_id_str = os.environ.get('ADMIN_CHAT_ID')
 
@@ -186,15 +231,23 @@ async def place_in_house_order(table_id: int, items: list = Body(...), session: 
     total_price = sum(item.get('price', 0) * item.get('quantity', 0) for item in items)
     products_str = ", ".join([f"{item['name']} x {item['quantity']}" for item in items])
 
+    # --- ОТРИМУЄМО СТАТУС ЗА ЗАМОВЧУВАННЯМ (Новий - ID 1) ---
+    new_status = await session.get(OrderStatus, 1)
+    if not new_status:
+        # Fallback, якщо статусу з ID 1 немає (малоймовірно)
+        new_status = OrderStatus(id=1, name="Новий", requires_kitchen_notify=True)
+
     order = Order(
         customer_name=f"Стіл: {table.name}", phone_number=f"table_{table.id}",
         address=None, products=products_str, total_price=total_price,
         is_delivery=False, delivery_time="In House", order_type="in_house",
-        table_id=table.id, status_id=1 # Статус "Новий"
+        table_id=table.id, status_id=new_status.id
     )
     session.add(order)
     await session.commit()
     await session.refresh(order)
+    # Завантажуємо статус в об'єкт замовлення, щоб переконатися, що він доступний
+    await session.refresh(order, ['status'])
 
     history_entry = OrderStatusHistory(
         order_id=order.id, status_id=order.status_id,
@@ -252,12 +305,16 @@ async def place_in_house_order(table_id: int, items: list = Body(...), session: 
                     reply_markup=kb_admin.as_markup()
                 )
 
-        # 2. --- НОВЕ: Розподіл на Кухню та Бар ---
-        # Викликаємо функцію розподілу, яка надішле чеки поварам та барменам
-        try:
-            await distribute_order_to_production(admin_bot, order, session)
-        except Exception as e:
-            logger.error(f"Помилка при розподілі замовлення #{order.id} на кухню/бар: {e}")
+        # 2. --- НОВЕ: Розподіл на Кухню та Бар (ВИПРАВЛЕНО) ---
+        # Перевіряємо, чи статус замовлення вимагає відправки на виробництво
+        if order.status.requires_kitchen_notify:
+            try:
+                await distribute_order_to_production(admin_bot, order, session)
+                logger.info(f"Замовлення #{order.id} відправлено на виробництво (статус вимагає цього).")
+            except Exception as e:
+                logger.error(f"Помилка при розподілі замовлення #{order.id} на кухню/бар: {e}")
+        else:
+            logger.info(f"Замовлення #{order.id} НЕ відправлено на виробництво (налаштування статусу).")
             
         return JSONResponse(content={"message": "Замовлення прийнято! Офіціант незабаром його підтвердить.", "order_id": order.id})
 

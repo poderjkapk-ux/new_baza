@@ -333,7 +333,6 @@ ADMIN_HTML_TEMPLATE = """
 </html>
 """
 
-# ОНОВЛЕНИЙ ШАБЛОН ДЛЯ СТОРІНКИ "СТОЛИКИ"
 ADMIN_TABLES_BODY = """
 <style>
     .qr-code-img {{
@@ -433,7 +432,6 @@ window.onclick = function(event) {{
 </script>
 """
 
-# ВИПРАВЛЕНИЙ ШАБЛОН ДЛЯ ФОРМИ ЗАМОВЛЕННЯ
 ADMIN_ORDER_FORM_BODY = """
 <style>
     .form-grid {{
@@ -2048,6 +2046,7 @@ ADMIN_CLIENT_DETAIL_BODY = """
 """
 
 # ОНОВЛЕНИЙ ШАБЛОН ДЛЯ МЕНЮ В РЕСТОРАНІ (ПО QR-КОДУ)
+# Тепер містить історію замовлень та загальний рахунок
 IN_HOUSE_MENU_HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="uk">
@@ -2085,13 +2084,9 @@ IN_HOUSE_MENU_HTML_TEMPLATE = """
     </style>
     <style>
         :root {{
-            /* ЗМІНЕНО: Нейтральна світла тема */
             --bg-color: var(--background-color, #f4f4f4);
             --card-bg: #ffffff;
             --text-color: #333333;
-            /* --primary-color: #5a5a5a; (Overridden) */
-            /* --primary-hover-color: #404040; (Overridden) */
-            /* --primary-glow-color: rgba(0, 0, 0, 0.1); (Overridden) */
             --border-color: var(--secondary-color, #dddddd);
             --dark-text-for-accent: #ffffff;
             --side-padding: 20px;
@@ -2102,7 +2097,6 @@ IN_HOUSE_MENU_HTML_TEMPLATE = """
         @keyframes spin {{ 0% {{ transform: rotate(0deg); }} 100% {{ transform: rotate(360deg); }} }}
         html {{ scroll-behavior: smooth; overflow-y: scroll; }}
         body {{
-            /* font-family: 'Golos Text', sans-serif; (Moved) */
             margin: 0;
             background-color: var(--bg-color);
             color: var(--text-color);
@@ -2112,17 +2106,14 @@ IN_HOUSE_MENU_HTML_TEMPLATE = """
         .header-logo-container {{ display: inline-block; margin-bottom: 25px; }}
         .header-logo {{ height: 100px; width: auto; }}
         header h1 {{
-            /* font-family: 'Playfair Display', serif; (Moved) */
             font-size: clamp(2.5em, 5vw, 3.5em);
             color: var(--text-color); margin: 0; font-weight: 700;
         }}
         header p {{
-            /* font-family: 'Golos Text', sans-serif; (Moved) */
             font-size: clamp(1em, 2vw, 1.2em);
             color: #888; margin-top: 10px; letter-spacing: 4px; text-transform: uppercase;
         }}
         .table-name-header {{
-            /* font-family: 'Golos Text', sans-serif; (Moved) */
             font-size: clamp(1.2em, 2.5vw, 1.5em);
             color: var(--primary-color); margin-top: 20px;
         }}
@@ -2154,7 +2145,6 @@ IN_HOUSE_MENU_HTML_TEMPLATE = """
         #menu {{ display: grid; grid-template-columns: 1fr; gap: 40px; padding: 0 var(--side-padding); }}
         .category-section {{ margin-bottom: 30px; padding-top: 90px; margin-top: -90px; }}
         .category-title {{
-            /* font-family: 'Playfair Display', serif; (Moved) */
             font-size: clamp(2.2em, 4vw, 2.8em);
             color: var(--primary-color); padding-bottom: 15px; margin-bottom: 40px;
             text-align: center; border-bottom: 1px solid var(--border-color); position: relative;
@@ -2181,10 +2171,10 @@ IN_HOUSE_MENU_HTML_TEMPLATE = """
         .product-image {{ width: 100%; height: 100%; object-fit: cover; transition: transform 0.4s ease; }}
         .product-card:hover .product-image {{ transform: scale(1.1); }}
         .product-info {{ padding: 25px; flex-grow: 1; display: flex; flex-direction: column; }}
-        .product-name {{ /* font-family: 'Playfair Display', serif; (Moved) */ font-size: 1.7em; margin: 0 0 10px; }}
+        .product-name {{ font-size: 1.7em; margin: 0 0 10px; }}
         .product-desc {{ font-size: 0.9em; color: #777; margin: 0 0 20px; flex-grow: 1; line-height: 1.6; }}
         .product-footer {{ display: flex; justify-content: space-between; align-items: center; }}
-        .product-price {{ /* font-family: 'Playfair Display', serif; (Moved) */ font-size: 1.8em; color: var(--primary-color); }}
+        .product-price {{ font-size: 1.8em; color: var(--primary-color); }}
         .add-to-cart-btn {{
             background: var(--primary-color); color: var(--dark-text-for-accent);
             border: none; padding: 12px 22px; border-radius: 5px; cursor: pointer;
@@ -2196,18 +2186,23 @@ IN_HOUSE_MENU_HTML_TEMPLATE = """
             box-shadow: 0 0 15px var(--primary-glow-color);
         }}
         
-        #cart-sidebar {{
+        #cart-sidebar, #history-sidebar {{
             position: fixed; top: 0; right: -100%; width: 100%; max-width: 420px; height: 100%;
-            background-color: rgba(255, 255, 255, 0.85); backdrop-filter: blur(15px);
+            background-color: rgba(255, 255, 255, 0.95); backdrop-filter: blur(15px);
             border-left: 1px solid var(--border-color); box-shadow: -5px 0 25px rgba(0,0,0,0.1);
-            transition: right 0.4s ease-in-out; display: flex; flex-direction: column; z-index: 1000;
+            transition: all 0.4s ease-in-out; display: flex; flex-direction: column; z-index: 1000;
             color: var(--text-color);
         }}
+        #history-sidebar {{ left: -100%; right: auto; border-left: none; border-right: 1px solid var(--border-color); box-shadow: 5px 0 25px rgba(0,0,0,0.1); }}
+
         #cart-sidebar.open {{ right: 0; }}
+        #history-sidebar.open {{ left: 0; }}
+
         .cart-header {{ padding: 20px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; }}
-        .cart-header h2 {{ margin: 0; color: var(--primary-color); /* font-family: 'Playfair Display', serif; (Moved) */}}
-        #close-cart-btn {{ background: none; border: none; color: var(--text-color); font-size: 2.5em; cursor: pointer; line-height: 1; transition: transform 0.2s ease, color 0.2s ease;}}
-        #close-cart-btn:hover {{ color: var(--primary-color); transform: rotate(90deg); }}
+        .cart-header h2 {{ margin: 0; color: var(--primary-color); }}
+        #close-cart-btn, #close-history-btn {{ background: none; border: none; color: var(--text-color); font-size: 2.5em; cursor: pointer; line-height: 1; transition: transform 0.2s ease, color 0.2s ease;}}
+        #close-cart-btn:hover, #close-history-btn:hover {{ color: var(--primary-color); transform: rotate(90deg); }}
+        
         .cart-items {{ flex-grow: 1; overflow-y: auto; padding: 20px; }}
         .cart-item {{ animation: popIn 0.3s ease-out; display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding-bottom: 15px; border-bottom: 1px solid var(--border-color); }}
         .cart-item-info {{ flex-grow: 1; }} .cart-item-name {{ font-weight: 600; }}
@@ -2217,6 +2212,7 @@ IN_HOUSE_MENU_HTML_TEMPLATE = """
         .cart-item-controls span {{ margin: 0 10px; }}
         .cart-footer {{ padding: 20px; border-top: 1px solid var(--border-color); background-color: rgba(255, 255, 255, 0.8); }}
         .cart-total {{ display: flex; justify-content: space-between; font-size: 1.2em; font-weight: 700; margin-bottom: 20px; }}
+        
         .action-buttons {{ padding: 0 20px 20px; display: flex; flex-direction: column; gap: 10px; }}
         .action-btn, #place-order-btn {{
             width: 100%; padding: 15px; font-size: 1.1em; cursor: pointer; border-radius: 5px;
@@ -2231,6 +2227,7 @@ IN_HOUSE_MENU_HTML_TEMPLATE = """
         .call-waiter-btn, .request-bill-btn {{ background-color: transparent; color: var(--primary-color); }}
         .call-waiter-btn:hover, .request-bill-btn:hover {{ background-color: var(--secondary-color, #f4f4f4); }}
 
+        /* Floating Buttons */
         #cart-toggle {{
             position: fixed; bottom: 20px; right: 20px; background-color: var(--primary-color);
             color: var(--dark-text-for-accent); border: none; border-radius: 50%;
@@ -2238,15 +2235,41 @@ IN_HOUSE_MENU_HTML_TEMPLATE = """
             display: flex; justify-content: center; align-items: center;
             box-shadow: 0 4px 15px rgba(0,0,0,0.2); transition: all 0.3s ease;
         }}
+        #history-toggle {{
+            position: fixed; bottom: 20px; left: 20px; background-color: #fff;
+            color: var(--primary-color); border: 1px solid var(--primary-color); border-radius: 50%;
+            width: 60px; height: 60px; cursor: pointer; z-index: 1001;
+            display: flex; justify-content: center; align-items: center;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1); transition: all 0.3s ease;
+        }}
+        
         #cart-toggle.popping {{ animation: cartPop 0.4s ease; }}
-        #cart-toggle svg {{ width: 28px; height: 28px; }}
+        #cart-toggle svg, #history-toggle svg {{ width: 28px; height: 28px; }}
         #cart-toggle:hover {{ transform: scale(1.1); background-color: var(--primary-hover-color); }}
+        #history-toggle:hover {{ transform: scale(1.1); background-color: #f9f9f9; }}
+        
         #cart-count {{
             position: absolute; top: -5px; right: -5px; background: var(--primary-color);
             color: var(--dark-text-for-accent); border-radius: 50%; width: 25px; height: 25px;
             font-size: 0.8em; display: flex; justify-content: center; align-items: center;
             font-weight: 700; border: 2px solid var(--card-bg);
         }}
+        
+        /* Styles for History Items */
+        .history-item {{
+            padding: 15px; border: 1px solid var(--border-color); border-radius: 8px;
+            margin-bottom: 15px; background-color: rgba(0,0,0,0.02);
+        }}
+        .history-header {{ display: flex; justify-content: space-between; margin-bottom: 10px; font-size: 0.9em; color: #777; }}
+        .history-products {{ font-weight: 500; margin-bottom: 10px; line-height: 1.4; }}
+        .history-footer {{ display: flex; justify-content: space-between; font-weight: 700; color: var(--primary-color); }}
+        .grand-total-section {{
+            margin-top: 20px; padding-top: 15px; border-top: 2px dashed var(--border-color);
+            font-size: 1.1em;
+        }}
+        .total-row {{ display: flex; justify-content: space-between; margin-bottom: 5px; }}
+        .total-row.final {{ font-size: 1.3em; font-weight: 800; color: var(--primary-color); margin-top: 10px; }}
+
         .toast {{
             position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%);
             background-color: #333; color: #fff; padding: 15px 25px; border-radius: 8px;
@@ -2283,10 +2306,49 @@ IN_HOUSE_MENU_HTML_TEMPLATE = """
     </div>
     <div style="height: 100px;"></div>
     
+    <button id="history-toggle" title="Історія та Рахунок">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+        </svg>
+    </button>
+
     <button id="cart-toggle">
         <svg fill="currentColor" viewBox="0 0 20 20"><path d="M3 1a1 1 0 000 2h1.22l.305 1.222a.997.997 0 00.01.042l1.358 5.43-.893.892C3.74 11.846 4.632 14 6.414 14H15a1 1 0 000-2H6.414l1-1H14a1 1 0 00.894-.553l3-6A1 1 0 0017 3H6.28l-.31-1.243A1 1 0 005 1H3zM16 16.5a1.5 1.5 0 11-3 0 1.5 1.5 0 013 0zM6.5 18a1.5 1.5 0 10-3 0 1.5 1.5 0 003 0z"></path></svg>
         <span id="cart-count">0</span>
     </button>
+
+    <aside id="history-sidebar">
+        <div class="cart-header">
+            <h2>Ваш рахунок</h2>
+            <button id="close-history-btn">&times;</button>
+        </div>
+        <div class="cart-items">
+            <div id="history-list"></div>
+            
+            <div class="grand-total-section">
+                <div class="total-row">
+                    <span>Замовлені страви:</span>
+                    <span><b id="history-total">{grand_total}</b> грн</span>
+                </div>
+                <div class="total-row" style="color: #777;">
+                    <span>Поточний кошик:</span>
+                    <span id="cart-pending-total">0 грн</span>
+                </div>
+                <div class="total-row final">
+                    <span>Разом до сплати:</span>
+                    <span id="grand-total-display">{grand_total} грн</span>
+                </div>
+            </div>
+        </div>
+        <div class="action-buttons">
+             <button class="action-btn request-bill-btn">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3.375m-3.375 2.25h10.5m4.5 0a4.5 4.5 0 00-4.5-4.5h-2.25a4.5 4.5 0 00-4.5 4.5v2.25a4.5 4.5 0 004.5 4.5h2.25a4.5 4.5 0 004.5-4.5v-2.25z" /></svg>
+                <div class="btn-spinner"></div>
+                <span>Попросити рахунок</span>
+            </button>
+        </div>
+    </aside>
+
     <aside id="cart-sidebar">
         <div class="cart-header">
             <h2>Ваше замовлення</h2>
@@ -2310,11 +2372,6 @@ IN_HOUSE_MENU_HTML_TEMPLATE = """
                 <div class="btn-spinner"></div>
                 <span>Викликати офіціанта</span>
             </button>
-            <button class="action-btn request-bill-btn">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3.375m-3.375 2.25h10.5m4.5 0a4.5 4.5 0 00-4.5-4.5h-2.25a4.5 4.5 0 00-4.5 4.5v2.25a4.5 4.5 0 004.5 4.5h2.25a4.5 4.5 0 004.5-4.5v-2.25z" /></svg>
-                <div class="btn-spinner"></div>
-                <span>Попросити рахунок</span>
-            </button>
         </div>
     </aside>
     <div id="toast" class="toast"></div>
@@ -2323,12 +2380,19 @@ IN_HOUSE_MENU_HTML_TEMPLATE = """
             const TABLE_ID = {table_id};
             let cart = {{}};
             const menuData = {menu_data};
+            
+            // --- NEW: Data from backend ---
+            const historyData = {history_data};
+            const initialGrandTotal = {grand_total};
 
             const menuContainer = document.getElementById('menu');
             const categoryNav = document.getElementById('category-nav');
             const cartSidebar = document.getElementById('cart-sidebar');
+            const historySidebar = document.getElementById('history-sidebar'); // New sidebar
             const cartToggle = document.getElementById('cart-toggle');
+            const historyToggle = document.getElementById('history-toggle'); // New toggle
             const closeCartBtn = document.getElementById('close-cart-btn');
+            const closeHistoryBtn = document.getElementById('close-history-btn'); // New close
             const cartItemsContainer = document.getElementById('cart-items-container');
             const cartTotalPriceEl = document.getElementById('cart-total-price');
             const cartCountEl = document.getElementById('cart-count');
@@ -2336,12 +2400,46 @@ IN_HOUSE_MENU_HTML_TEMPLATE = """
             const toastEl = document.getElementById('toast');
             const loader = document.getElementById('loader');
             
+            // --- Elements for Bill Summary ---
+            const historyListEl = document.getElementById('history-list');
+            const cartPendingTotalEl = document.getElementById('cart-pending-total');
+            const grandTotalDisplayEl = document.getElementById('grand-total-display');
+            
             const showToast = (message) => {{
                 toastEl.textContent = message;
                 toastEl.classList.add('show');
                 setTimeout(() => {{
                     toastEl.classList.remove('show');
                 }}, 4000);
+            }};
+            
+            // --- Render History ---
+            const renderHistory = () => {{
+                historyListEl.innerHTML = '';
+                if (historyData.length === 0) {{
+                    historyListEl.innerHTML = '<p style="text-align:center; color:#888;">Історія замовлень порожня.</p>';
+                    return;
+                }}
+                
+                historyData.forEach(order => {{
+                    const item = document.createElement('div');
+                    item.className = 'history-item';
+                    // Format products list properly
+                    const productsHtml = order.products.replace(/, /g, '<br>');
+                    
+                    item.innerHTML = `
+                        <div class="history-header">
+                            <span>#${{order.id}} • ${{order.time}}</span>
+                            <span>${{order.status}}</span>
+                        </div>
+                        <div class="history-products">${{productsHtml}}</div>
+                        <div class="history-footer">
+                            <span>Сума:</span>
+                            <span>${{order.total_price}} грн</span>
+                        </div>
+                    `;
+                    historyListEl.appendChild(item);
+                }});
             }};
 
             const updateCartView = () => {{
@@ -2372,9 +2470,16 @@ IN_HOUSE_MENU_HTML_TEMPLATE = """
                     cartItemsContainer.innerHTML = '<p style="text-align:center; color:#888;">Ваш кошик порожній</p>';
                     placeOrderBtn.disabled = true;
                 }}
+                
+                // Update Cart Totals
                 cartTotalPriceEl.textContent = `${{totalPrice.toFixed(2)}} грн`;
                 cartCountEl.textContent = totalCount;
                 cartCountEl.style.display = totalCount > 0 ? 'flex' : 'none';
+                
+                // Update Bill Summary (History Sidebar)
+                cartPendingTotalEl.textContent = `${{totalPrice}} грн`;
+                const finalTotal = initialGrandTotal + totalPrice;
+                grandTotalDisplayEl.textContent = `${{finalTotal}} грн`;
             }};
 
             const renderMenu = (data) => {{
@@ -2472,8 +2577,18 @@ IN_HOUSE_MENU_HTML_TEMPLATE = """
                 updateCartView();
             }});
             
-            cartToggle.addEventListener('click', () => cartSidebar.classList.add('open'));
+            cartToggle.addEventListener('click', () => {{
+                cartSidebar.classList.add('open');
+                historySidebar.classList.remove('open');
+            }});
+            
+            historyToggle.addEventListener('click', () => {{
+                historySidebar.classList.add('open');
+                cartSidebar.classList.remove('open');
+            }});
+            
             closeCartBtn.addEventListener('click', () => cartSidebar.classList.remove('open'));
+            closeHistoryBtn.addEventListener('click', () => historySidebar.classList.remove('open'));
 
             const handleApiButtonClick = async (button, apiUrl) => {{
                 button.disabled = true;
@@ -2516,18 +2631,18 @@ IN_HOUSE_MENU_HTML_TEMPLATE = """
                     showToast(result.message);
                     if (response.ok) {{
                         cart = {{}};
-                        updateCartView();
-                        cartSidebar.classList.remove('open');
+                        // Перезавантажуємо сторінку, щоб оновити історію замовлень і загальний рахунок
+                        setTimeout(() => window.location.reload(), 1500);
                     }}
                 }} catch (error) {{
                     showToast('Помилка при відправці замовлення.');
-                }} finally {{
                     button.disabled = false;
                     button.classList.remove('working');
                 }}
             }});
             
             renderMenu(menuData);
+            renderHistory();
             updateCartView();
         }});
     </script>
